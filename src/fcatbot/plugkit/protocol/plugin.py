@@ -1,0 +1,99 @@
+from abc import ABC, abstractmethod
+from typing import Any, Awaitable, ClassVar
+from pathlib import Path
+import asyncio
+
+from .bus import EventBus
+from .state import PluginStatus, PluginState
+from .data import PluginConfig
+
+class Plugin(ABC):
+    name: ClassVar[str]
+    version: ClassVar[str]
+    dependencies: ClassVar[dict[str, str]] = {}
+    mixins: ClassVar[list[type] | None] = None
+
+    _bus: EventBus | None = None
+    _status: PluginStatus = PluginStatus()
+    _data_root: Path | None = None
+    _tasks: set[asyncio.Task] = set()
+    _handler_tokens: list[str] = []
+
+    # 由 PluginLoader 在加载时注入：文件系统层面的真实模块名
+    _plugin_source_name: ClassVar[str] = ""
+
+    def __init__(self):
+        self._tasks: set[asyncio.Task] = set()
+        self._handler_tokens = []
+
+    @abstractmethod
+    def on_load(self) -> None | Awaitable[None]:
+        """插件被加载到内存时调用（此时 bus / data_root 已绑定）"""
+        raise NotImplementedError
+
+    def on_start(self) -> None | Awaitable[None]:
+        """插件被启动（进入事件循环）时调用"""
+        pass
+
+    def on_stop(self) -> None | Awaitable[None]:
+        """插件被停止时调用（事件循环仍在运行）"""
+        pass
+
+    def on_unload(self) -> None | Awaitable[None]:
+        """插件被卸载时调用（bus 即将解绑）"""
+        pass
+
+    async def run(self) -> None:
+        """插件主协程，生命周期内持续运行"""
+        pass
+
+    # ---------- reload 生命周期钩子 ----------
+
+    def on_before_reload(self) -> None | Awaitable[None]:
+        """热重载前调用：可在此保存临时状态"""
+        pass
+
+    def on_after_reload(self) -> None | Awaitable[None]:
+        """热重载后调用：新实例已替换旧实例，可在此恢复状态"""
+        pass
+
+    def on_config_change(self, name: str, config: PluginConfig) -> None | Awaitable[None]:
+        """外部配置文件被修改时调用"""
+        config.reload()
+
+    @property
+    def bus(self) -> EventBus:
+        if self._bus is None:
+            raise RuntimeError(f"Plugin {self.name} not loaded")
+        return self._bus
+
+    @property
+    def status(self) -> PluginStatus:
+        return self._status
+
+    def create_task(self, coro, *, name: str | None = None) -> asyncio.Task:
+        """创建绑定到插件生命周期的后台任务"""  # 兼容测试等非运行 loop 场景
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop_policy().get_event_loop()
+        task = loop.create_task(coro, name=name)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
+
+    def _cancel_all_tasks(self) -> None:
+        for task in list(self._tasks):
+            if not task.done():
+                task.cancel()
+        self._tasks.clear()
+
+    def get_data_path(self, name: str) -> Path:
+        if self._data_root is None:
+            raise RuntimeError("Plugin not loaded")
+        return self._data_root / self.name / "data" / f"{name}.yml"
+
+    def get_config_path(self, name: str) -> Path:
+        if self._data_root is None:
+            raise RuntimeError("Plugin not loaded")
+        return self._data_root / self.name / "config" / f"{name}.yml"
