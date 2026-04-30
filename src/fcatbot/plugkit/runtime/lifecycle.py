@@ -497,6 +497,17 @@ class LifecycleManager:
         self._set_status(plugin, PluginState.Stopped, stopped_at=time.time())
         entry.fw_state = PluginState.Stopped
 
+        # 停止时自动刷盘
+        for attr_name in dir(plugin):
+            attr = getattr(plugin, attr_name, None)
+            if isinstance(attr, PluginData) and attr.is_bound:
+                try:
+                    attr.save()
+                except Exception:
+                    logger.exception(
+                        "Auto-save failed for %s.%s", plugin.name, attr_name
+                    )
+
     def _set_status(self, plugin: Plugin, state: PluginState, **kwargs) -> None:
         plugin._status = plugin._status.replace(state=state, **kwargs)
 

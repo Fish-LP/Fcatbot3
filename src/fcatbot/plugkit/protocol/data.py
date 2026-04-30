@@ -267,10 +267,22 @@ class PluginData(ConfigSection):
         object.__setattr__(self, "_path", None)
         object.__setattr__(self, "_backend", backend or YAMLBackend())
 
+    @property
+    def is_bound(self) -> bool:
+        """是否已绑定持久化路径。
+
+        Return:
+            若 _bind() 已调用且设置了有效路径，返回 True。
+        """
+        return self._path is not None
+
     def _bind(self, path: Path) -> None:
         self._path = path.with_suffix(f".{self._backend.extension}")
         if self._path.exists():
             self._load()
+        else:
+            # 文件不存在：立即生成默认配置，方便用户编辑
+            self.save()
 
     def _load(self) -> None:
         if self._path is None:
