@@ -35,9 +35,9 @@ class ServiceNotFound(ServiceError):
             name: 缺失的服务名。
             available: 当前可用的服务名列表，用于提示。
         """
-        msg = f"Service '{name}' not found"
+        msg = f"服务 '{name}' 未找到"
         if available:
-            msg += f". Available: {available}"
+            msg += f"。可用服务: {available}"
         super().__init__(msg)
         self.name = name
         self.available = available or []
@@ -59,8 +59,8 @@ class ServiceConflict(ServiceError):
             existing_provider: 已注册该服务的插件名。
         """
         super().__init__(
-            f"Service '{name}' already registered by plugin '{existing_provider}'. "
-            f"Use force=True to overwrite."
+            f"服务 '{name}' 已被插件 '{existing_provider}' 注册。"
+            f"使用 force=True 覆盖。"
         )
         self.name = name
         self.existing_provider = existing_provider
@@ -82,9 +82,7 @@ class VersionMismatch(ServiceError):
             required: 请求的版本约束。
             actual: 实际注册的版本。
         """
-        super().__init__(
-            f"Service '{name}' version mismatch: required {required}, got {actual}"
-        )
+        super().__init__(f"服务 '{name}' 版本不匹配：要求 {required}，实际 {actual}")
         self.required = required
         self.actual = actual
 

@@ -65,17 +65,17 @@ def test_config_defaults():
 
 
 def test_config_invalid_uri():
-    with pytest.raises(ValueError, match="URI must start with"):
+    with pytest.raises(ValueError, match="URI 必须以 ws:// 或 wss:// 开头"):
         WebSocketConfig(uri="http://example.com")
 
 
 def test_config_negative_heartbeat():
-    with pytest.raises(ValueError, match="Heartbeat cannot be negative"):
+    with pytest.raises(ValueError, match="心跳值不能为负数"):
         WebSocketConfig(uri="ws://localhost", heartbeat=-1)
 
 
 def test_config_compression_out_of_range():
-    with pytest.raises(ValueError, match="Compression level must be between 0 and 9"):
+    with pytest.raises(ValueError, match="压缩级别必须在 0 到 9 之间"):
         WebSocketConfig(uri="ws://localhost", compression=15)
 
 
@@ -244,7 +244,7 @@ async def test_connection_connect_failure(
         cfg = WebSocketConfig(uri="ws://localhost")
         conn = AioHttpWebSocketConnection(cfg, logger)
 
-        with pytest.raises(WSConnectionError, match="Connection failed"):
+        with pytest.raises(WSConnectionError, match="连接失败"):
             await conn.connect()
 
         assert conn.state == WebSocketState.Disconnected
@@ -370,14 +370,14 @@ async def test_async_client_broadcast():
 @pytest.mark.asyncio
 async def test_async_client_get_message_not_found():
     client = AsyncWebSocketClient("ws://localhost")
-    with pytest.raises(ListenerEvictedError, match="not found"):
+    with pytest.raises(ListenerEvictedError, match="未找到"):
         await client.get_message("non-existent-id")
 
 
 @pytest.mark.asyncio
 async def test_async_client_send_not_running():
     client = AsyncWebSocketClient("ws://localhost")
-    with pytest.raises(WSConnectionError, match="Client not running"):
+    with pytest.raises(WSConnectionError, match="客户端未运行"):
         await client.send("hello")
 
 
@@ -387,7 +387,7 @@ async def test_async_client_send_queue_full():
     client._running = True
     client._send_queue.put_nowait("block")
 
-    with pytest.raises(Exception, match="Send queue is full"):
+    with pytest.raises(Exception, match="发送队列已满"):
         await client.send("overflow")
 
 

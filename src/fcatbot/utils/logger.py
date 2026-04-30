@@ -68,7 +68,7 @@ class LogConfig:
     def _parse_level(level: str, default: int) -> int:
         val = getattr(logging, level.upper(), None)
         if not isinstance(val, int):
-            warnings.warn(f"Invalid log level '{level}', using default.")
+            warnings.warn(f"日志级别 '{level}' 无效，使用默认值。")
             return default
         return val
 
