@@ -7,7 +7,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set
 
 
 # ---------- 上下文 ----------
@@ -169,15 +169,21 @@ class _PermissionHolder:
                 return True
         return False
 
-    def check(self, perm_str: str, context: Optional[_Context] = None) -> Optional[bool]:
+    def check(
+        self, perm_str: str, context: Optional[_Context] = None
+    ) -> Optional[bool]:
         ctx = context or _Context()
         now = time.time()
         with self._lock:
             for entry in self._ctx_blacklist:
-                if entry.is_active(ctx, now) and _PermissionMatcher.match(entry.perm, perm_str):
+                if entry.is_active(ctx, now) and _PermissionMatcher.match(
+                    entry.perm, perm_str
+                ):
                     return False
             for entry in self._ctx_whitelist:
-                if entry.is_active(ctx, now) and _PermissionMatcher.match(entry.perm, perm_str):
+                if entry.is_active(ctx, now) and _PermissionMatcher.match(
+                    entry.perm, perm_str
+                ):
                     return True
             for p in self._blacklist:
                 if _PermissionMatcher.match(p, perm_str):
@@ -186,7 +192,9 @@ class _PermissionHolder:
                 if _PermissionMatcher.match(p, perm_str):
                     return True
             for binding in self._ctx_roles:
-                if binding.is_active(ctx, now) and binding.role.has_permission(perm_str):
+                if binding.is_active(ctx, now) and binding.role.has_permission(
+                    perm_str
+                ):
                     return True
             for r in self._roles:
                 if r.has_permission(perm_str):

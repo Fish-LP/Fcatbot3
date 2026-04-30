@@ -1,26 +1,33 @@
-from abc import ABC, abstractmethod
-from typing import Any, Awaitable, ClassVar
-from pathlib import Path
 import asyncio
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Any, Awaitable, ClassVar
+
+from fcatbot.plugkit.protocol.service import ServiceRegistry
 
 from .bus import EventBus
-from .state import PluginStatus, PluginState
 from .data import PluginConfig
+from .state import PluginStatus
+
 
 class Plugin(ABC):
     name: ClassVar[str]
     version: ClassVar[str]
     dependencies: ClassVar[dict[str, str]] = {}
+    provides: ClassVar[dict[str, Any]] = {}
     mixins: ClassVar[list[type] | None] = None
 
-    _bus: EventBus | None = None
     _status: PluginStatus = PluginStatus()
-    _data_root: Path | None = None
     _tasks: set[asyncio.Task] = set()
     _handler_tokens: list[str] = []
 
     # 由 PluginLoader 在加载时注入：文件系统层面的真实模块名
     _plugin_source_name: ClassVar[str] = ""
+    # 由 LifecycleManager 注入
+    _debug: bool | None = None
+    _bus: EventBus | None = None
+    _data_root: Path | None = None
+    _registry: ServiceRegistry | None = None
 
     def __init__(self):
         self._tasks: set[asyncio.Task] = set()
@@ -28,7 +35,7 @@ class Plugin(ABC):
 
     @abstractmethod
     def on_load(self) -> None | Awaitable[None]:
-        """插件被加载到内存时调用（此时 bus / data_root 已绑定）"""
+        """插件被加载到内存时调用（此时 bus / data_root(属性) 已绑定）"""
         raise NotImplementedError
 
     def on_start(self) -> None | Awaitable[None]:
@@ -57,7 +64,9 @@ class Plugin(ABC):
         """热重载后调用：新实例已替换旧实例，可在此恢复状态"""
         pass
 
-    def on_config_change(self, name: str, config: PluginConfig) -> None | Awaitable[None]:
+    def on_config_change(
+        self, name: str, config: PluginConfig
+    ) -> None | Awaitable[None]:
         """外部配置文件被修改时调用"""
         config.reload()
 
@@ -68,6 +77,12 @@ class Plugin(ABC):
         return self._bus
 
     @property
+    def debug(self) -> bool:
+        if self._debug is None:
+            raise RuntimeError(f"Plugin {self.name} not loaded")
+        return self._debug
+
+    @property
     def status(self) -> PluginStatus:
         return self._status
 
@@ -76,7 +91,16 @@ class Plugin(ABC):
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.get_event_loop_policy().get_event_loop()
+            try:
+                loop = asyncio.get_event_loop_policy().get_event_loop()
+            except RuntimeError:
+                loop = None
+
+        if loop is None or loop.is_closed():
+            raise RuntimeError(
+                f"No active event loop to create task for plugin '{self.name}'"
+            )
+
         task = loop.create_task(coro, name=name)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -97,3 +121,17 @@ class Plugin(ABC):
         if self._data_root is None:
             raise RuntimeError("Plugin not loaded")
         return self._data_root / self.name / "config" / f"{name}.yml"
+
+    @property
+    def registry(self) -> ServiceRegistry:
+        """获取当前插件绑定的服务注册表。
+
+        Returns:
+            绑定的 ServiceRegistry 实例。
+
+        Raises:
+            RuntimeError: 若 LifecycleManager 尚未完成注入。
+        """
+        if self._registry is None:
+            raise RuntimeError(f"Plugin '{self.name}' has no registry bound")
+        return self._registry

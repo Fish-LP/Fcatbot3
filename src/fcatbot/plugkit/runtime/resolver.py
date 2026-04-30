@@ -1,5 +1,6 @@
 from collections import deque
 
+
 def resolve_load_order(graph: dict[str, set[str]]) -> list[str]:
     in_degree = {name: len(deps) for name, deps in graph.items()}
     queue = deque([name for name, deg in in_degree.items() if deg == 0])

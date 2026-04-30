@@ -1,5 +1,7 @@
 from typing import Protocol
+
 from .plugin import Plugin
+
 
 class PluginManager(Protocol):
     async def load(self, plugin_cls: type[Plugin]) -> Plugin: ...

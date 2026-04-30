@@ -1,15 +1,13 @@
 """
 纯通信层 - 只负责发送和自动包装，不定义具体接口
 """
+
 import functools
 import inspect
 import types
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass, field
-from typing import (
-    Any, Awaitable, Dict, Generic, Optional, TypeVar, Union
-)
-
+from typing import Any, Awaitable, Dict, Generic, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -17,6 +15,7 @@ T = TypeVar("T")
 @dataclass
 class ApiRequest:
     """API请求定义"""
+
     activity: str
     data: Dict[str, Any] = field(default_factory=dict)
     headers: Optional[Dict[str, str]] = None
@@ -34,47 +33,51 @@ def _extract_invoke_return(cls) -> Any:
 
 class ApiMeta(ABCMeta):
     """API元类 - 自动包装所有公共实例方法到 invoke"""
-    
+
     def __new__(mcs, name, bases, namespace, **kwargs):
         cls = super().__new__(mcs, name, bases, namespace, **kwargs)
-        
+
         # 跳过 APIClient 自身
         if not bases:
             return cls
-        
+
         # 推断 invoke 的实际返回类型
         invoke_return = _extract_invoke_return(cls)
-        
+
         for attr_name, attr_value in namespace.items():
             if attr_name.startswith("_") or attr_name in ("invoke", "call"):
                 continue
             if not inspect.isfunction(attr_value):
                 continue
-            
+
             wrapper = mcs._make_wrapper(attr_value)
             if wrapper is not None:
                 # 运行时重写 wrapper 的返回注解，改善 IDE/REPL 体验
                 wrapper.__annotations__["return"] = Awaitable[invoke_return]
                 functools.update_wrapper(wrapper, attr_value)
                 setattr(cls, attr_name, wrapper)
-        
+
         return cls
-    
+
     @staticmethod
     def _make_wrapper(orig):
         is_coro = inspect.iscoroutinefunction(orig)
-        
+
         if is_coro:
+
             @functools.wraps(orig)
             async def wrapper(self: "APIClient", *args, **kwargs):
                 result = await orig(self, *args, **kwargs)
                 return await self._dispatch_result(result)
+
             return wrapper
         else:
+
             @functools.wraps(orig)
             async def wrapper(self: "APIClient", *args, **kwargs):
                 result = orig(self, *args, **kwargs)
                 return await self._dispatch_result(result)
+
             return wrapper
 
 
@@ -83,7 +86,7 @@ class APIClient(ABC, Generic[T], metaclass=ApiMeta):
     纯通信层基类
     泛型参数 T = invoke 的实际返回类型（如 dict、UserModel 等）
     """
-    
+
     @abstractmethod
     async def invoke(self, request: ApiRequest) -> T:
         """执行API调用 - 子类必须实现"""
@@ -116,15 +119,16 @@ class APIClient(ABC, Generic[T], metaclass=ApiMeta):
     def __getattr__(self, name: str) -> Any:
         """动态调用任意 API 方法"""
         if name.startswith("_"):
-            raise AttributeError(f"{self.__class__.__name__!r} object has no attribute {name!r}")
-        
+            raise AttributeError(
+                f"{self.__class__.__name__!r} object has no attribute {name!r}"
+            )
+
         async def method(**kwargs) -> T:
             return await self.invoke(ApiRequest(name, kwargs))
-        
+
         bound_method = types.MethodType(method, self)
         object.__setattr__(self, name, bound_method)
         return bound_method
-
 
 
 # class UserClient(APIClient[dict]):

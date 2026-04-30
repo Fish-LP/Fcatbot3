@@ -235,3 +235,4 @@ NapCat/base.py
 NapCat/steam_api.py
 NapCat/steam_api.pyi
 NapCat/steam_api.pyi.txt
+totp.py

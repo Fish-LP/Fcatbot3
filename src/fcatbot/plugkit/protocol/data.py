@@ -2,7 +2,15 @@
 import copy
 from collections.abc import MutableMapping
 from pathlib import Path
-from typing import Any, Callable, Generic, Optional, Self, TypeVar, get_args, get_origin, get_type_hints, overload
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Optional,
+    Self,
+    TypeVar,
+    overload,
+)
 
 from .storage import StorageBackend, YAMLBackend
 
@@ -12,10 +20,13 @@ TSection = TypeVar("TSection", bound="ConfigSection")
 
 class _MISSING:
     __slots__ = ()
+
+
 MISSING = _MISSING()
 
 
 # ==================== Value 描述符 ====================
+
 
 class Value(Generic[T]):
     def __init__(
@@ -74,6 +85,7 @@ class Value(Generic[T]):
 
 # ==================== 工厂函数 ====================
 
+
 def value(
     default: T = MISSING,  # type: ignore[assignment]
     *,
@@ -90,10 +102,13 @@ def section(
     readonly: bool = False,
     repr: bool = True,
 ) -> Any:
-    return Value(default=MISSING, default_factory=default_factory, readonly=readonly, repr=repr)
+    return Value(
+        default=MISSING, default_factory=default_factory, readonly=readonly, repr=repr
+    )
 
 
 # ==================== ConfigSection ====================
+
 
 class ConfigSection(MutableMapping[str, Any]):
     """
@@ -157,7 +172,9 @@ class ConfigSection(MutableMapping[str, Any]):
         try:
             val = self._storage[name]
         except KeyError:
-            raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'") from None
+            raise AttributeError(
+                f"'{type(self).__name__}' has no attribute '{name}'"
+            ) from None
 
         # 懒转换兜底
         if isinstance(val, dict) and not isinstance(val, ConfigSection):
@@ -213,7 +230,9 @@ class ConfigSection(MutableMapping[str, Any]):
             if isinstance(v, ConfigSection):
                 result[k] = v.to_dict()
             elif isinstance(v, list):
-                result[k] = [x.to_dict() if isinstance(x, ConfigSection) else x for x in v]
+                result[k] = [
+                    x.to_dict() if isinstance(x, ConfigSection) else x for x in v
+                ]
             else:
                 result[k] = v
         return result
@@ -229,6 +248,7 @@ class ConfigSection(MutableMapping[str, Any]):
 
 
 # ==================== PluginData / PluginConfig ====================
+
 
 class PluginData(ConfigSection):
     _name: str
@@ -274,5 +294,6 @@ class PluginData(ConfigSection):
 
 class PluginConfig(PluginData):
     """用户可修改的配置。强制 YAML 后端。"""
+
     def __init__(self, name: str = "", *, autosave: bool = False):
         super().__init__(name, autosave=autosave, backend=YAMLBackend())

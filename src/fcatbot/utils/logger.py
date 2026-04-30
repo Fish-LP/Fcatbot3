@@ -238,8 +238,10 @@ class JsonFormatter(logging.Formatter):
 
 # ---------- 格式模板 ----------
 def _make_formats(use_color: bool) -> Dict[str, Dict[str, str]]:
-    c = Color if use_color else type(
-        "NoColor", (), {k: "" for k in dir(Color) if not k.startswith("_")}
+    c = (
+        Color
+        if use_color
+        else type("NoColor", (), {k: "" for k in dir(Color) if not k.startswith("_")})
     )  # type: ignore
     c = cast(Color, c)
     return {
@@ -313,9 +315,7 @@ def setup_logging(config: Optional[LogConfig] = None) -> Optional[QueueListener]
 
     root_file_path = os.path.join(config.log_dir, config.file_name)
     if config.use_json:
-        file_formatter: logging.Formatter = JsonFormatter(
-            datefmt="%Y-%m-%d %H:%M:%S"
-        )
+        file_formatter: logging.Formatter = JsonFormatter(datefmt="%Y-%m-%d %H:%M:%S")
     else:
         file_formatter = DynamicFormatter(
             fmt_dict=formats["file"],

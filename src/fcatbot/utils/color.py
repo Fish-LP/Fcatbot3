@@ -179,10 +179,7 @@ class Color(metaclass=_ColorMeta):
                 return 231
             return round(((r - 8) / 247) * 24) + 232
         return (
-            16
-            + 36 * round(r / 255 * 5)
-            + 6 * round(g / 255 * 5)
-            + round(b / 255 * 5)
+            16 + 36 * round(r / 255 * 5) + 6 * round(g / 255 * 5) + round(b / 255 * 5)
         )
 
     @classmethod

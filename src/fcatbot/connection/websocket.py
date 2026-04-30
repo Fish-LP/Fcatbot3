@@ -2,7 +2,6 @@
 # @Author Fish.zh@outlook.com
 # @Version 1.2
 import asyncio
-from enum import Enum
 import json
 import logging
 import random
@@ -11,6 +10,7 @@ import time
 import uuid
 from asyncio import QueueFull
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Dict, NewType, Optional, Tuple, Union
 
 import aiohttp
@@ -22,6 +22,7 @@ _LISTENER_CLOSED = object()  # 用于唤醒阻塞消费者的关闭哨兵
 
 class MessageType(Enum):
     """WebSocket 消息类型枚举"""
+
     Text = "text"
     Binary = "binary"
     Ping = "ping"
@@ -33,6 +34,7 @@ class MessageType(Enum):
 
 class WebSocketState(Enum):
     """WebSocket 连接状态枚举"""
+
     Disconnected = "disconnected"
     Connecting = "connecting"
     Connected = "connected"
@@ -43,31 +45,35 @@ class WebSocketState(Enum):
 
 class WebSocketError(Exception):
     """WebSocket 基础异常"""
+
     pass
 
 
 class WSConnectionError(WebSocketError):
     """连接相关异常（避免遮蔽内置 ConnectionError）"""
+
     pass
 
 
 class ListenerEvictedError(WebSocketError):
     """监听器被驱逐异常"""
+
     pass
 
 
 class ListenerClosedError(WebSocketError):
     """监听器已关闭异常"""
+
     pass
 
 
 @dataclass
 class WebSocketConfig:
     """WebSocket 配置类
-    
+
     包含 WebSocket 连接的所有配置参数，包括连接超时、重连策略、
     压缩设置、监听器限制等。
-    
+
     Attributes:
         uri: WebSocket 服务器地址，必须以 ws:// 或 wss:// 开头
         headers: 连接请求头字典
@@ -85,6 +91,7 @@ class WebSocketConfig:
         max_listeners: 最大监听器数量，默认 1000
         listener_buffer_size: 每个监听器的缓冲区大小，默认 100
     """
+
     uri: str
     headers: Dict[str, str] = field(default_factory=dict)
     heartbeat: float = 30.0
@@ -103,7 +110,7 @@ class WebSocketConfig:
 
     def __post_init__(self):
         """配置验证
-        
+
         Raises:
             ValueError: URI 格式不正确或配置参数无效时抛出
         """
@@ -119,10 +126,10 @@ class WebSocketConfig:
 
 class WebSocketListener:
     """WebSocket 消息监听器
-    
+
     为每个订阅者提供独立的消息队列，支持异步迭代和超时控制。
     当队列满时自动丢弃最旧的消息。
-    
+
     Attributes:
         id: 监听器唯一标识符
         queue: 消息队列
@@ -131,7 +138,7 @@ class WebSocketListener:
 
     def __init__(self, buffer_size: int = 100):
         """初始化监听器
-        
+
         Args:
             buffer_size: 消息队列缓冲区大小，默认 100
         """
@@ -142,13 +149,13 @@ class WebSocketListener:
 
     async def put(self, message: Any, msg_type: MessageType) -> bool:
         """放入消息到队列
-        
+
         如果队列已满，自动丢弃最旧的消息以腾出空间。
-        
+
         Args:
             message: 消息内容
             msg_type: 消息类型
-        
+
         Returns:
             bool: 放入成功返回 True，失败返回 False
         """
@@ -169,13 +176,13 @@ class WebSocketListener:
 
     async def get(self, timeout: Optional[float] = None) -> Tuple[Any, MessageType]:
         """获取消息（阻塞）
-        
+
         Args:
             timeout: 超时时间（秒），None 表示无限等待
-        
+
         Returns:
             Tuple[Any, MessageType]: 消息内容和类型
-        
+
         Raises:
             ListenerClosedError: 监听器已关闭时抛出
             asyncio.TimeoutError: 超时时抛出
@@ -204,10 +211,10 @@ class WebSocketListener:
 
     async def get_nowait(self) -> Optional[Tuple[Any, MessageType]]:
         """非阻塞获取消息（定义为 async 以便线程安全调度）
-        
+
         Returns:
             Optional[Tuple[Any, MessageType]]: 消息内容和类型，无数据时返回 None
-        
+
         Raises:
             ListenerClosedError: 监听器已关闭时抛出
         """
@@ -241,7 +248,7 @@ class WebSocketListener:
     @property
     def is_closed(self) -> bool:
         """检查监听器是否已关闭
-        
+
         Returns:
             bool: 已关闭返回 True，否则返回 False
         """
@@ -253,10 +260,10 @@ class WebSocketListener:
 
     async def __anext__(self):
         """异步迭代下一个消息
-        
+
         Returns:
             Tuple[Any, MessageType]: 消息内容和类型
-        
+
         Raises:
             StopAsyncIteration: 监听器关闭时抛出
         """
@@ -268,10 +275,10 @@ class WebSocketListener:
 
 class AioHttpWebSocketConnection:
     """基于 aiohttp 的 WebSocket 连接管理
-    
+
     负责底层的 WebSocket 连接建立、消息收发和资源清理。
     自动处理压缩协商失败等边界情况。
-    
+
     Attributes:
         config: WebSocket 配置对象
         logger: 日志记录器
@@ -283,7 +290,7 @@ class AioHttpWebSocketConnection:
 
     def __init__(self, config: WebSocketConfig, logger: logging.Logger):
         """初始化连接管理器
-        
+
         Args:
             config: WebSocket 配置对象
             logger: 日志记录器实例
@@ -309,10 +316,10 @@ class AioHttpWebSocketConnection:
 
     async def connect(self) -> None:
         """建立 WebSocket 连接
-        
+
         如果已经处于连接中或已连接状态，直接返回。
         支持自动处理压缩协商失败的情况。
-        
+
         Raises:
             WSConnectionError: 连接失败时抛出
         """
@@ -391,10 +398,10 @@ class AioHttpWebSocketConnection:
 
     async def send(self, message: Union[str, bytes, Dict]) -> None:
         """发送消息
-        
+
         Args:
             message: 要发送的消息，支持字符串、字节或字典（自动转为 JSON）
-        
+
         Raises:
             WSConnectionError: 未连接时抛出
             Exception: 发送失败时抛出
@@ -429,10 +436,10 @@ class AioHttpWebSocketConnection:
 
     async def receive(self) -> Tuple[Any, MessageType]:
         """接收消息
-        
+
         Returns:
             Tuple[Any, MessageType]: 消息数据和类型
-        
+
         Raises:
             WSConnectionError: 未连接时抛出
             asyncio.TimeoutError: 接收超时时抛出
@@ -485,7 +492,7 @@ class AioHttpWebSocketConnection:
 
     def is_connected(self) -> bool:
         """检查连接是否处于活动状态
-        
+
         Returns:
             bool: 已连接且 WebSocket 未关闭返回 True
         """
@@ -498,9 +505,9 @@ class AioHttpWebSocketConnection:
 
 class ReconnectionStrategy:
     """重连策略管理
-    
+
     实现指数退避 + 随机抖动的重连策略。
-    
+
     Attributes:
         config: WebSocket 配置对象
         attempt_count: 当前重连尝试次数
@@ -509,7 +516,7 @@ class ReconnectionStrategy:
 
     def __init__(self, config: WebSocketConfig):
         """初始化重连策略
-        
+
         Args:
             config: WebSocket 配置对象
         """
@@ -519,7 +526,7 @@ class ReconnectionStrategy:
 
     def should_reconnect(self) -> bool:
         """检查是否应该继续重连
-        
+
         Returns:
             bool: 未达到最大重连次数返回 True；0 或负数表示无限重连
         """
@@ -529,9 +536,9 @@ class ReconnectionStrategy:
 
     def get_delay(self) -> float:
         """计算下次重连的延迟时间
-        
+
         使用指数退避算法：delay = min(base * 2^(n-1), max) + jitter
-        
+
         Returns:
             float: 延迟时间（秒）
         """
@@ -559,7 +566,7 @@ class ReconnectionStrategy:
 
     def get_state(self) -> Dict[str, Any]:
         """获取当前重连状态
-        
+
         Returns:
             Dict[str, Any]: 包含尝试次数、上次尝试时间、最大次数的字典
         """
@@ -572,10 +579,10 @@ class ReconnectionStrategy:
 
 class AsyncWebSocketClient:
     """异步 WebSocket 客户端 - 使用监听器模式
-    
+
     高性能异步 WebSocket 客户端，支持多监听器、自动重连、
     消息广播和完善的指标统计。
-    
+
     Attributes:
         config: WebSocket 配置对象
         logger: 日志记录器
@@ -605,7 +612,7 @@ class AsyncWebSocketClient:
         listener_buffer_size: int = 100,
     ):
         """初始化异步 WebSocket 客户端
-        
+
         Args:
             uri: WebSocket 服务器地址
             logger: 可选的日志记录器，默认使用模块日志
@@ -665,7 +672,7 @@ class AsyncWebSocketClient:
     @property
     def running(self) -> bool:
         """检查客户端是否正在运行
-        
+
         Returns:
             bool: 正在运行返回 True
         """
@@ -673,7 +680,7 @@ class AsyncWebSocketClient:
 
     async def __aenter__(self):
         """异步上下文管理器入口
-        
+
         Returns:
             AsyncWebSocketClient: 客户端实例
         """
@@ -682,7 +689,7 @@ class AsyncWebSocketClient:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """异步上下文管理器出口
-        
+
         Args:
             exc_type: 异常类型
             exc_val: 异常值
@@ -692,7 +699,7 @@ class AsyncWebSocketClient:
 
     async def start(self) -> None:
         """启动客户端
-        
+
         启动主事件循环，开始处理连接、发送和接收。
         如果已经在运行，直接返回。
         """
@@ -707,7 +714,7 @@ class AsyncWebSocketClient:
 
     async def stop(self) -> None:
         """停止客户端
-        
+
         优雅地关闭连接、清理所有监听器和任务。
         如果已经停止，直接返回。
         """
@@ -740,12 +747,12 @@ class AsyncWebSocketClient:
 
     async def create_listener(self, buffer_size: Optional[int] = None) -> ListenerId:
         """创建消息监听器
-        
+
         如果监听器数量达到上限，自动淘汰最旧的监听器。
-        
+
         Args:
             buffer_size: 缓冲区大小，默认使用配置值
-        
+
         Returns:
             ListenerId: 新监听器的唯一标识符
         """
@@ -773,7 +780,7 @@ class AsyncWebSocketClient:
 
     async def remove_listener(self, listener_id: ListenerId) -> None:
         """移除指定监听器
-        
+
         Args:
             listener_id: 要移除的监听器 ID
         """
@@ -788,14 +795,14 @@ class AsyncWebSocketClient:
         self, listener_id: ListenerId, timeout: Optional[float] = None
     ) -> Tuple[Any, MessageType]:
         """从指定监听器获取消息（阻塞）
-        
+
         Args:
             listener_id: 监听器 ID
             timeout: 超时时间（秒），None 表示无限等待
-        
+
         Returns:
             Tuple[Any, MessageType]: 消息内容和类型
-        
+
         Raises:
             ListenerEvictedError: 监听器不存在时抛出
             ListenerClosedError: 监听器已关闭时抛出
@@ -813,13 +820,13 @@ class AsyncWebSocketClient:
         self, listener_id: ListenerId
     ) -> Optional[Tuple[Any, MessageType]]:
         """从指定监听器非阻塞获取消息（async 以便线程安全调度）
-        
+
         Args:
             listener_id: 监听器 ID
-        
+
         Returns:
             Optional[Tuple[Any, MessageType]]: 消息内容和类型，无数据返回 None
-        
+
         Raises:
             ListenerEvictedError: 监听器不存在时抛出
             ListenerClosedError: 监听器已关闭时抛出
@@ -834,13 +841,13 @@ class AsyncWebSocketClient:
 
     async def get_listener(self, listener_id: ListenerId) -> WebSocketListener:
         """获取监听器实例（用于异步迭代等高级操作）
-        
+
         Args:
             listener_id: 监听器 ID
-        
+
         Returns:
             WebSocketListener: 监听器实例
-        
+
         Raises:
             ListenerEvictedError: 监听器不存在时抛出
         """
@@ -854,12 +861,12 @@ class AsyncWebSocketClient:
 
     async def send(self, message: Union[str, bytes, Dict]) -> None:
         """发送消息到 WebSocket 服务器
-        
+
         消息会被放入发送队列，由后台任务异步发送。
-        
+
         Args:
             message: 要发送的消息，支持字符串、字节或字典
-        
+
         Raises:
             WSConnectionError: 客户端未运行时抛出
             WebSocketError: 发送队列满时抛出
@@ -874,7 +881,7 @@ class AsyncWebSocketClient:
 
     async def get_metrics(self) -> Dict[str, Any]:
         """获取客户端运行指标
-        
+
         Returns:
             Dict[str, Any]: 包含连接指标、重连状态、监听器统计的字典
         """
@@ -896,9 +903,9 @@ class AsyncWebSocketClient:
 
     async def _broadcast_message(self, message: Any, msg_type: MessageType) -> None:
         """广播消息到所有监听器
-        
+
         如果某个监听器队列满，该监听器会被自动移除。
-        
+
         Args:
             message: 消息内容
             msg_type: 消息类型
@@ -920,7 +927,7 @@ class AsyncWebSocketClient:
 
     async def _main_loop(self) -> None:
         """主事件循环
-        
+
         管理连接生命周期，协调发送和接收任务。
         处理连接断开、重连和异常恢复。
         """
@@ -973,7 +980,7 @@ class AsyncWebSocketClient:
 
     async def _handle_disconnected(self) -> None:
         """处理连接断开状态
-        
+
         根据重连策略决定是否重连，并执行退避等待。
         如果超过最大重连次数，停止客户端。
         """
@@ -997,7 +1004,7 @@ class AsyncWebSocketClient:
 
     async def _process_send_queue(self) -> None:
         """处理发送队列
-        
+
         持续从队列取出消息并发送，处理连接中断时的消息回退。
         """
         while self._running:
@@ -1029,7 +1036,7 @@ class AsyncWebSocketClient:
 
     async def _process_receive(self) -> None:
         """处理接收消息
-        
+
         持续接收消息并广播到所有监听器，处理超时和连接错误。
         """
         while self._running:
@@ -1059,10 +1066,10 @@ class AsyncWebSocketClient:
 
 class SyncWebSocketClient:
     """同步 WebSocket 客户端包装器
-    
+
     为同步代码提供 WebSocket 客户端功能，内部在后台线程运行异步事件循环。
     所有方法都是线程安全的。
-    
+
     Attributes:
         _client: 底层异步客户端实例
         _loop: 事件循环
@@ -1072,7 +1079,7 @@ class SyncWebSocketClient:
 
     def __init__(self, *args, **kwargs):
         """初始化同步客户端
-        
+
         Args:
             *args: 传递给 AsyncWebSocketClient 的位置参数
             **kwargs: 传递给 AsyncWebSocketClient 的关键字参数
@@ -1086,7 +1093,7 @@ class SyncWebSocketClient:
 
     def start(self) -> None:
         """启动客户端（在后台线程中运行事件循环）
-        
+
         如果已经在运行，直接返回。启动后会等待客户端真正就绪。
         """
         with self._lock:
@@ -1121,7 +1128,7 @@ class SyncWebSocketClient:
 
     def stop(self) -> None:
         """停止客户端
-        
+
         优雅地停止事件循环和后台线程，清理资源。
         如果已经停止，直接返回。
         """
@@ -1146,10 +1153,10 @@ class SyncWebSocketClient:
 
     def create_listener(self, buffer_size: Optional[int] = None) -> str:
         """创建消息监听器（同步）
-        
+
         Args:
             buffer_size: 缓冲区大小，默认使用配置值
-        
+
         Returns:
             str: 监听器 ID 字符串
         """
@@ -1160,7 +1167,7 @@ class SyncWebSocketClient:
 
     def remove_listener(self, listener_id: ListenerId) -> None:
         """移除监听器（同步）
-        
+
         Args:
             listener_id: 要移除的监听器 ID
         """
@@ -1173,11 +1180,11 @@ class SyncWebSocketClient:
         self, listener_id: ListenerId, timeout: Optional[float] = None
     ) -> Tuple[Any, MessageType]:
         """获取消息（同步阻塞）
-        
+
         Args:
             listener_id: 监听器 ID
             timeout: 超时时间（秒），包含线程调度时间
-        
+
         Returns:
             Tuple[Any, MessageType]: 消息内容和类型
         """
@@ -1186,12 +1193,14 @@ class SyncWebSocketClient:
         )
         return future.result(timeout=timeout)
 
-    def get_message_nowait(self, listener_id: ListenerId) -> Optional[Tuple[Any, MessageType]]:
+    def get_message_nowait(
+        self, listener_id: ListenerId
+    ) -> Optional[Tuple[Any, MessageType]]:
         """非阻塞获取消息（同步）
-        
+
         Args:
             listener_id: 监听器 ID
-        
+
         Returns:
             Optional[Tuple[Any, MessageType]]: 消息内容和类型，无数据返回 None
         """
@@ -1202,7 +1211,7 @@ class SyncWebSocketClient:
 
     def send(self, message: Union[str, bytes, Dict]) -> None:
         """发送消息（同步）
-        
+
         Args:
             message: 要发送的消息，支持字符串、字节或字典
         """
@@ -1213,7 +1222,7 @@ class SyncWebSocketClient:
 
     def get_metrics(self) -> Dict[str, Any]:
         """获取客户端指标（同步）
-        
+
         Returns:
             Dict[str, Any]: 客户端运行指标字典
         """
@@ -1224,7 +1233,7 @@ class SyncWebSocketClient:
 
     def __enter__(self):
         """上下文管理器入口
-        
+
         Returns:
             SyncWebSocketClient: 客户端实例
         """
@@ -1233,7 +1242,7 @@ class SyncWebSocketClient:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """上下文管理器出口
-        
+
         Args:
             exc_type: 异常类型
             exc_val: 异常值
@@ -1244,6 +1253,7 @@ class SyncWebSocketClient:
 
 # 使用示例
 if __name__ == "__main__":
+
     async def example_usage():
         """异步客户端使用示例"""
         # 创建客户端

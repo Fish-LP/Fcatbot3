@@ -1,24 +1,38 @@
-import asyncio
 import argparse
-import json
+import asyncio
 import logging
-import signal
 import sys
 from pathlib import Path
 from typing import ClassVar, Optional
 
-from fcatbot.connection.websocket import AsyncWebSocketClient, ListenerId, MessageType
-from fcatbot.core.client import NapCatClient, set_api
+from fcatbot.connection.websocket import AsyncWebSocketClient, ListenerId
+from fcatbot.plugkit.protocol.event import Event
+from fcatbot.plugkit.protocol.plugin import Plugin
 from fcatbot.plugkit.runtime.bus import Bus
 from fcatbot.plugkit.runtime.lifecycle import LifecycleManager
 from fcatbot.plugkit.runtime.loader import PluginLoader
-from fcatbot.plugkit.protocol.event import Event
-from fcatbot.plugkit.protocol.plugin import Plugin
-from fcatbot.models.message import Message
 from fcatbot.utils.logger import setup_logging
 
 setup_logging()
 log = logging.getLogger("Bot")
+
+
+class ConnectionService:
+    """受控 WS 发送服务"""
+
+    version = "1.0.0"
+
+    def __init__(self, ws: AsyncWebSocketClient):
+        self._ws = ws
+        self.uri = ws.config.uri
+
+    async def send_raw(self, payload: str | bytes) -> None:
+        """发送原始 WS 帧（只写）"""
+        await self._ws.send(payload)
+
+    @property
+    def connected(self) -> bool:
+        return self._ws._running
 
 
 class Bot:
@@ -34,8 +48,10 @@ class Bot:
         plugin_dir: Optional[Path | str] = None,
         data_dir: Path | str = "data",
         debug: bool = False,
+        dev: bool = False,
     ):
         self.debug = debug
+        self.dev = dev
         self.root_id = str(root_id)
         self.url = url
         self.token = token
@@ -48,8 +64,6 @@ class Bot:
         elif url.startswith("wss://"):
             http_url = "https://" + url[6:]
 
-        self._api = NapCatClient(base_url=http_url)
-        set_api(self._api)
         log.debug("HTTP API 基地址: %s", http_url)
 
         # ---------- WebSocket（仅保存配置，不连接） ----------
@@ -93,7 +107,7 @@ class Bot:
         async def _runner() -> None:
             try:
                 await self.run_async()
-                await self._stop_event.wait()   # 等 stop() 或 finally 里 set
+                await self._stop_event.wait()  # 等 stop() 或 finally 里 set
             except asyncio.CancelledError:
                 log.info("Bot 任务被取消")
             except Exception:
@@ -128,8 +142,17 @@ class Bot:
                 bus=self._bus,
                 data_root=self.data_dir,
                 loader=self._loader,
-                dev=self.debug,
+                debug=self.debug,
+                dev=self.dev,
                 plugin_dirs=self._plugin_dirs,
+            )
+
+            # 注册到注册表
+            self._plugin_manager._registry.register(
+                name="bot.ws.connection",
+                instance=ConnectionService(self._ws),
+                provider="Bot",
+                version=ConnectionService.version,
             )
 
             plugin_classes = self._discover_plugins()
@@ -171,7 +194,7 @@ class Bot:
             except Exception as exc:
                 log.error("WS 关闭异常: %s", exc)
             Bot.running = False
-            self._stop_event.set()        # ← 关键：释放 _runner 的 wait()
+            self._stop_event.set()  # ← 关键：释放 _runner 的 wait()
             log.info("Bot 已完全停止")
 
     # ==================== 内部运行循环 ====================
@@ -192,10 +215,14 @@ class Bot:
 
         # 不解析、不过滤，直接包装为原始事件
         event = Event(
-            name="sdk.raw",           # 统一原始事件名
-            data=msg,                 # 原始字符串 / bytes
+            name="sdk.raw",  # 统一原始事件名
+            data=msg,  # 原始字符串 / bytes
             source="sdk",
-            metadata={"msg_type": msg_type.name if hasattr(msg_type, "name") else str(msg_type)},
+            metadata={
+                "msg_type": (
+                    msg_type.name if hasattr(msg_type, "name") else str(msg_type)
+                )
+            },
         )
         if self._bus is not None:
             await self._bus.publish(event)
@@ -242,7 +269,11 @@ class Bot:
                 name: Optional[str] = None
                 if entry.is_dir() and (entry / "__init__.py").exists():
                     name = entry.name
-                elif entry.is_file() and entry.suffix == ".py" and entry.stem != "__init__":
+                elif (
+                    entry.is_file()
+                    and entry.suffix == ".py"
+                    and entry.stem != "__init__"
+                ):
                     name = entry.stem
 
                 if not name:
@@ -268,9 +299,14 @@ if __name__ == "__main__":
     p_start = sub.add_parser("start", help="启动 Bot")
     p_start.add_argument("-u", "--url", required=True, help="WebSocket 地址")
     p_start.add_argument("-t", "--token", help="鉴权 token")
-    p_start.add_argument("--plugin-dir", type=Path, help="额外插件目录")
+    p_start.add_argument("-p", "--plugin-dir", type=Path, help="额外插件目录")
     p_start.add_argument("--data-dir", type=Path, default="data", help="数据目录")
-    p_start.add_argument("--debug", action="store_true", help="调试模式")
+    p_start.add_argument(
+        "--debug", action="store_true", help="调试模式（详细日志+异常透传）"
+    )
+    p_start.add_argument(
+        "--dev", action="store_true", help="开发模式（插件热重载+文件监视）"
+    )
 
     args = parser.parse_args()
 
@@ -282,6 +318,7 @@ if __name__ == "__main__":
             plugin_dir=args.plugin_dir,
             data_dir=args.data_dir,
             debug=args.debug,
+            dev=args.dev,
         )
         try:
             bot.run()

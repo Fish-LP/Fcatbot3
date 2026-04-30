@@ -6,18 +6,17 @@ RBAC 完整测试套件
 from __future__ import annotations
 
 import time
-from typing import Any, Dict
 
 import pytest
 
-from fcatbot.core.client import NapCatClient, set_api
 from fcatbot.rbac.engine import _Context, _PermissionHolder, _Role
-from fcatbot.rbac.manager import RBACManager, Role, Track
-
+from fcatbot.rbac.manager import RBACManager
+from plugins.adapter.napcat.core.client import NapCatClient, set_api
 
 # ============================================================
 # Fixtures
 # ============================================================
+
 
 @pytest.fixture(autouse=True)
 def _mock_api():
@@ -63,6 +62,7 @@ def rbac_with_roles(manager: RBACManager) -> RBACManager:
 # 引擎层 —— _Context
 # ============================================================
 
+
 class TestContext:
     def test_global_matches_anything(self) -> None:
         global_ctx = _Context()
@@ -93,6 +93,7 @@ class TestContext:
 # ============================================================
 # 引擎层 —— _Role 权限与继承
 # ============================================================
+
 
 class TestRole:
     def test_direct_permission(self) -> None:
@@ -130,6 +131,7 @@ class TestRole:
 # 引擎层 —— _PermissionHolder 全局权限
 # ============================================================
 
+
 class TestPermissionHolderGlobal:
     def test_whitelist_allow(self, holder: _PermissionHolder) -> None:
         holder.permit("plugin.chatgpt")
@@ -147,13 +149,17 @@ class TestPermissionHolderGlobal:
         assert not holder.can("plugin.chatgpt")
         assert holder.check("plugin.chatgpt") is False
 
-    def test_role_permission(self, holder: _PermissionHolder, role_admin: _Role) -> None:
+    def test_role_permission(
+        self, holder: _PermissionHolder, role_admin: _Role
+    ) -> None:
         holder.add_role(role_admin)
         assert holder.can("group.kick")
         assert holder.can("group.mute")
         assert not holder.can("other.perm")
 
-    def test_role_inheritance_via_holder(self, holder: _PermissionHolder, role_mod: _Role) -> None:
+    def test_role_inheritance_via_holder(
+        self, holder: _PermissionHolder, role_mod: _Role
+    ) -> None:
         admin = _Role("admin")
         admin.inherit_from(role_mod)
         admin.add_permission("group.set_name")
@@ -181,6 +187,7 @@ class TestPermissionHolderGlobal:
 # 引擎层 —— _PermissionHolder 上下文权限
 # ============================================================
 
+
 class TestPermissionHolderContext:
     def test_ctx_whitelist(self, holder: _PermissionHolder) -> None:
         ctx = _Context.of(group_id="123")
@@ -188,7 +195,9 @@ class TestPermissionHolderContext:
         assert holder.can("plugin.game", ctx)
         assert not holder.can("plugin.game")
 
-    def test_ctx_blacklist_overrides_ctx_whitelist(self, holder: _PermissionHolder) -> None:
+    def test_ctx_blacklist_overrides_ctx_whitelist(
+        self, holder: _PermissionHolder
+    ) -> None:
         ctx = _Context.of(group_id="123")
         holder.permit("plugin.game", context=ctx)
         holder.deny("plugin.game", context=ctx)
@@ -207,7 +216,9 @@ class TestPermissionHolderContext:
         assert holder.can("group.kick", ctx)
         assert not holder.can("group.kick")
 
-    def test_ctx_blacklist_overrides_global_whitelist(self, holder: _PermissionHolder) -> None:
+    def test_ctx_blacklist_overrides_global_whitelist(
+        self, holder: _PermissionHolder
+    ) -> None:
         holder.permit("plugin.game")
         ctx = _Context.of(group_id="123")
         holder.deny("plugin.game", context=ctx)
@@ -243,6 +254,7 @@ class TestPermissionHolderContext:
 # ============================================================
 # 引擎层 —— 完整优先级链
 # ============================================================
+
 
 class TestPermissionPriority:
     def test_full_priority_chain(self, holder: _PermissionHolder) -> None:
@@ -280,6 +292,7 @@ class TestPermissionPriority:
 # ============================================================
 # 管理层 —— RBACManager
 # ============================================================
+
 
 class TestRBACManager:
     def test_create_role(self, manager: RBACManager) -> None:
@@ -329,8 +342,11 @@ class TestRBACManager:
 # 管理层 —— Track 晋升轨道
 # ============================================================
 
+
 class TestTrack:
-    def test_promote_from_nothing(self, manager: RBACManager, holder: _PermissionHolder) -> None:
+    def test_promote_from_nothing(
+        self, manager: RBACManager, holder: _PermissionHolder
+    ) -> None:
         manager.create_role("member")
         manager.create_role("mod")
         track = manager.create_track("staff", ["member", "mod"])
@@ -338,7 +354,9 @@ class TestTrack:
         assert result == "member"
         assert holder.has_role("member")
 
-    def test_promote_step(self, manager: RBACManager, holder: _PermissionHolder) -> None:
+    def test_promote_step(
+        self, manager: RBACManager, holder: _PermissionHolder
+    ) -> None:
         manager.create_role("member")
         manager.create_role("mod")
         track = manager.create_track("staff", ["member", "mod"])
@@ -348,7 +366,9 @@ class TestTrack:
         assert not holder.has_role("member")
         assert holder.has_role("mod")
 
-    def test_promote_at_top(self, manager: RBACManager, holder: _PermissionHolder) -> None:
+    def test_promote_at_top(
+        self, manager: RBACManager, holder: _PermissionHolder
+    ) -> None:
         manager.create_role("member")
         track = manager.create_track("staff", ["member"])
         track.promote(holder)
@@ -365,7 +385,9 @@ class TestTrack:
         assert holder.has_role("member")
         assert not holder.has_role("mod")
 
-    def test_demote_at_bottom(self, manager: RBACManager, holder: _PermissionHolder) -> None:
+    def test_demote_at_bottom(
+        self, manager: RBACManager, holder: _PermissionHolder
+    ) -> None:
         manager.create_role("member")
         track = manager.create_track("staff", ["member"])
         track.promote(holder)
@@ -386,9 +408,11 @@ class TestTrack:
 # 容器层 —— User / GroupUser / Group
 # ============================================================
 
+
 class TestUserContainer:
     def test_group_user_auto_context(self) -> None:
-        from fcatbot.models.entity import GroupUser
+        from plugins.adapter.napcat.models.entity import GroupUser
+
         gu = GroupUser(123, 456, nickname="Bob", role="member")
         r = _Role("mod")
         r.add_permission("group.kick")
@@ -407,13 +431,15 @@ class TestUserContainer:
         assert gu2.can("group.kick")  # 仅在群789生效
 
     def test_group_user_check_returns_tristate(self) -> None:
-        from fcatbot.models.entity import GroupUser
+        from plugins.adapter.napcat.models.entity import GroupUser
+
         gu = GroupUser(123, 456)
         assert gu.check("unknown") is None
         assert not gu.can("unknown")
 
     def test_group_can(self) -> None:
-        from fcatbot.models.entity import Group
+        from plugins.adapter.napcat.models.entity import Group
+
         g = Group(123, "测试群")
         g.permit("plugin.chatgpt")
         assert g.can("plugin.chatgpt")
@@ -421,9 +447,10 @@ class TestUserContainer:
         assert not g.can("plugin.game")
 
     def test_group_check_member(self) -> None:
-        from fcatbot.models.entity import Group, GroupUser, User
+        from plugins.adapter.napcat.models.entity import Group, GroupUser, User
+
         g = Group(456, "测试群")
-        
+
         # User 全局有权限，在群内检查应生效
         u = User(123, nickname="Alice")
         r = _Role("admin")
@@ -441,13 +468,16 @@ class TestUserContainer:
         assert not g.check_member(gu, "group.kick")
 
     def test_group_check_member_int_fallback(self) -> None:
-        from fcatbot.models.entity import Group
+        from plugins.adapter.napcat.models.entity import Group
+
         g = Group(456)
         assert not g.check_member(123, "any.perm")
+
 
 # ============================================================
 # 边界与异常
 # ============================================================
+
 
 class TestEdgeCases:
     def test_cross_manager_inheritance(self) -> None:

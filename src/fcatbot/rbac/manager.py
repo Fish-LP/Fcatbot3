@@ -33,7 +33,7 @@ class Track:
         self._role_map[name] = role
 
     def get_current(self, holder: Any) -> str | None:
-        from fcatbot.rbac.engine import _PermissionHolder
+
         if not isinstance(holder, _PermissionHolder):
             return None
         for name in reversed(self._path):
@@ -42,7 +42,7 @@ class Track:
         return None
 
     def promote(self, holder: Any) -> str | None:
-        from fcatbot.rbac.engine import _PermissionHolder
+
         if not isinstance(holder, _PermissionHolder):
             return None
         current = self.get_current(holder)
@@ -63,7 +63,7 @@ class Track:
         return None
 
     def demote(self, holder: Any) -> str | None:
-        from fcatbot.rbac.engine import _PermissionHolder
+
         if not isinstance(holder, _PermissionHolder):
             return None
         current = self.get_current(holder)
@@ -82,6 +82,7 @@ class Track:
 
 # ---------- TypeGuard：运行时 + 静态双重收窄 ----------
 
+
 def is_role(obj: Role | None) -> TypeGuard[Role]:
     """TypeGuard：将 Role | None 收窄为 Role"""
     return obj is not None
@@ -92,6 +93,7 @@ def is_track(obj: Track | None) -> TypeGuard[Track]:
 
 
 # ---------- 管理器 ----------
+
 
 class RBACManager:
     def __init__(self, name: str = "default") -> None:

@@ -7,12 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from ..protocol.bus import EventBus
-from ..protocol.plugin import Plugin
-from ..protocol.state import PluginState, PluginStatus
-from ..protocol.data import PluginData, PluginConfig
-from ..protocol.exceptions import PluginFatalError
-from .decorators import on_event
+from fcatbot.plugkit.protocol.bus import EventBus
+from fcatbot.plugkit.protocol.data import PluginConfig, PluginData
+from fcatbot.plugkit.protocol.exceptions import PluginFatalError
+from fcatbot.plugkit.protocol.plugin import Plugin
+from fcatbot.plugkit.protocol.state import PluginState
+from fcatbot.plugkit.runtime.registry import PluginServiceRegistry
+
 from .resolver import resolve_load_order
 from .watcher import PluginWatcher
 
@@ -27,29 +28,38 @@ class _Entry:
 
 
 class LifecycleManager:
-    def __init__(self, bus: EventBus, data_root: Path, loader=None, *,
-                 strict: bool = False,
-                 dev: bool = False,
-                 plugin_dirs: Optional[list[Path]] = None):
+    def __init__(
+        self,
+        bus: EventBus,
+        data_root: Path,
+        loader=None,
+        *,
+        strict: bool = False,
+        dev: bool = False,
+        debug: bool = False,
+        plugin_dirs: Optional[list[Path]] = None,
+    ):
         self._bus = bus
         self._data_root = Path(data_root)
         self._loader = loader
         self._strict = strict
         self._dev = dev
+        self._debug = debug
         self._plugin_dirs = [Path(d) for d in plugin_dirs] if plugin_dirs else []
         self._plugins: dict[str, _Entry] = {}
         self._lock = asyncio.Lock()
         self._fatal_error: Optional[asyncio.Future] = None
         self._watcher: Optional[Any] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._registry = PluginServiceRegistry()
 
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
             pass
-        self._watcher = PluginWatcher(self)
+        self._watcher = PluginWatcher(self) if dev else None
 
-        if hasattr(bus, 'start') and not getattr(bus, '_started', False):
+        if hasattr(bus, "start") and not getattr(bus, "_started", False):
             bus.start()
 
     async def load(self, plugin_cls: type[Plugin]) -> Plugin:
@@ -66,10 +76,10 @@ class LifecycleManager:
 
     @staticmethod
     def _collect_mixins(plugin_cls: type[Plugin]) -> list[type]:
-        if 'mixins' in plugin_cls.__dict__:
-            explicit = plugin_cls.__dict__['mixins']
+        if "mixins" in plugin_cls.__dict__:
+            explicit = plugin_cls.__dict__["mixins"]
             if explicit is None:
-                pass
+                return []
             else:
                 for m in explicit:
                     if m not in plugin_cls.__mro__:
@@ -83,12 +93,14 @@ class LifecycleManager:
         for cls in plugin_cls.__mro__:
             if cls is Plugin or cls is object:
                 continue
-            if hasattr(cls, 'on_mixin_load') or hasattr(cls, 'on_mixin_unload'):
+            if hasattr(cls, "on_mixin_load") or hasattr(cls, "on_mixin_unload"):
                 mixins.append(cls)
         return mixins
 
     @staticmethod
-    def _call_mixin_method(mixin: type, method_name: str, plugin: Plugin, env: Any) -> Any:
+    def _call_mixin_method(
+        mixin: type, method_name: str, plugin: Plugin, env: Any
+    ) -> Any:
         """
         @classmethod / 设计文档约定: on_mixin_load(cls, plugin, env)
         """
@@ -111,19 +123,31 @@ class LifecycleManager:
                     )
 
         plugin = plugin_cls()
+
+        # 注入
         plugin._bus = self._bus
+        plugin._debug = self._debug
         plugin._data_root = self._data_root
+
         entry = _Entry(plugin=plugin, fw_state=PluginState.Loaded)
         self._plugins[plugin.name] = entry
         self._set_status(plugin, PluginState.Loaded, loaded_at=time.time())
 
         try:
+            # 服务注册注入
+            plugin._registry = self._registry
+            await self._auto_register_services(plugin)
+
             # 先绑定数据路径，再调用 on_load，允许用户在 on_load 中操作数据
             await self._bind_data(plugin)
-            env = type("Env", (), {
-                "data_root": self._data_root,
-                "bus": self._bus,
-            })()
+            env = type(
+                "Env",
+                (),
+                {
+                    "data_root": self._data_root,
+                    "bus": self._bus,
+                },
+            )()
 
             for mixin in self._collect_mixins(plugin_cls):
                 if hasattr(mixin, "on_mixin_load"):
@@ -132,18 +156,73 @@ class LifecycleManager:
                     )
 
             await self._run_async(plugin.on_load())
+            await self._bind_data(plugin)  # 二次绑定处理 on_load 动态添加的配置
             await self._bind_events(plugin)
 
             if self._watcher:
-                source_name = getattr(plugin_cls, '_plugin_source_name', plugin_cls.name)
-                code_path = self._loader.get_source_path(source_name) if self._loader else None
+                source_name = getattr(
+                    plugin_cls, "_plugin_source_name", plugin_cls.name
+                )
+                code_path = (
+                    self._loader.get_source_path(source_name) if self._loader else None
+                )
                 self._watcher.add_plugin(plugin, code_path=code_path)
 
             return plugin
         except Exception:
             # 加载中途失败，自清理，防止状态泄漏
+            self._registry.unregister_by_provider(plugin.name)
             self._plugins.pop(plugin.name, None)
             raise
+
+    async def _auto_register_services(self, plugin: Plugin) -> None:
+        """将插件声明的 provides 自动注册到注册表。
+
+        扫描 Plugin.provides 字典，将每个服务名与对应实例注册到
+        LifecycleManager 内部的 PluginServiceRegistry。
+
+        Args:
+            plugin: 已实例化且已完成 on_load 的插件对象。
+        """
+        cls = type(plugin)
+        if not cls.provides:
+            return
+
+        for svc_name, _contract in cls.provides.items():
+            instance = None
+            short_name = svc_name.split(".")[-1]
+
+            # 1. 尝试完整属性名（如 self."demo.echo" —— 通常因含点号而失败）
+            instance = getattr(plugin, svc_name, None)
+
+            # 2. 尝试短名（如 demo.echo → echo）
+            if instance is None and short_name != svc_name:
+                instance = getattr(plugin, short_name, None)
+
+            # 3. 契约是类时自动实例化，并挂载到短名属性供插件访问
+            # if instance is None and isinstance(_contract, type):
+            #     try:
+            #         instance = _contract()
+            #         setattr(plugin, short_name, instance)
+            #     except Exception:
+            #         pass
+
+            # 4. 最终回退到插件自身
+            if instance is None:
+                instance = plugin
+                logger.debug(
+                    "Plugin '%s' provides '%s' using self (no attribute '%s')",
+                    plugin.name,
+                    svc_name,
+                    svc_name,
+                )
+
+            self._registry.register(
+                name=svc_name,
+                instance=instance,
+                provider=plugin.name,
+                version=getattr(instance, "__version__", plugin.version),
+            )
 
     async def load_all(self, plugin_classes: list[type[Plugin]]) -> None:
         graph = {}
@@ -162,7 +241,9 @@ class LifecycleManager:
                     )
                 logger.warning(
                     "Plugin %s depends on %s which are not in load_all batch "
-                    "and not already loaded", cls.name, external
+                    "and not already loaded",
+                    cls.name,
+                    external,
                 )
             graph[cls.name] = deps
 
@@ -171,8 +252,8 @@ class LifecycleManager:
 
         try:
             for name in order:
-                loaded_in_batch.append(name)   # ← 先记录
-                await self.load(name_cls[name]) # ← 再加载
+                loaded_in_batch.append(name)  # ← 先记录
+                await self.load(name_cls[name])  # ← 再加载
         except Exception:
             logger.exception("load_all failed, rolling back batch")
             for name in reversed(loaded_in_batch):
@@ -213,6 +294,7 @@ class LifecycleManager:
         plugin = entry.plugin
 
         plugin._cancel_all_tasks()
+        self._registry.unregister_by_provider(plugin.name)
 
         for mixin in reversed(self._collect_mixins(type(plugin))):
             if hasattr(mixin, "on_mixin_unload"):
@@ -228,9 +310,14 @@ class LifecycleManager:
             attr = getattr(plugin, attr_name, None)
             if isinstance(attr, PluginData):
                 try:
-                    attr.save()
+                    if (
+                        getattr(attr, "_path", None) is not None
+                    ):  # 跳过从未绑定路径的数据
+                        attr.save()
                 except Exception:
-                    logger.exception("Error saving %s.%s during unload", name, attr_name)
+                    logger.exception(
+                        "Error saving %s.%s during unload", name, attr_name
+                    )
 
         await self._run_async(plugin.on_unload())
         self._set_status(plugin, PluginState.Unloaded, stopped_at=time.time())
@@ -248,7 +335,7 @@ class LifecycleManager:
             await self._unload_locked(name)
             if not self._loader:
                 raise RuntimeError("Reload requires loader")
-            source_name = getattr(plugin_cls, '_plugin_source_name', name)
+            source_name = getattr(plugin_cls, "_plugin_source_name", name)
             new_cls = await asyncio.to_thread(self._loader.load_class, source_name)
             plugin = await self._load_locked(new_cls)
 
@@ -260,15 +347,23 @@ class LifecycleManager:
 
     def notify_config_file_change(self, plugin_name: str, path: Path) -> None:
         coro = self._handle_config_file_change(plugin_name, path)
-        if self._loop is not None:
-            asyncio.run_coroutine_threadsafe(coro, self._loop)
+        loop = self._loop
+        if loop is not None and not loop.is_closed():
+            asyncio.run_coroutine_threadsafe(coro, loop)
         else:
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(coro)
+                if not loop.is_closed():
+                    loop.create_task(coro)
+                else:
+                    logger.warning(
+                        "Event loop closed, cannot notify config change for %s",
+                        plugin_name,
+                    )
             except RuntimeError:
                 logger.warning(
-                    "No event loop available to notify config change for %s", plugin_name
+                    "No event loop available to notify config change for %s",
+                    plugin_name,
                 )
 
     async def _handle_config_file_change(self, plugin_name: str, path: Path) -> None:
@@ -315,7 +410,7 @@ class LifecycleManager:
 
     async def shutdown(self) -> None:
         names = list(self._plugins.keys())
-        for name in reversed(names):          # 逆序
+        for name in reversed(names):  # 逆序
             try:
                 await self.unload(name)
             except Exception:
@@ -354,8 +449,10 @@ class LifecycleManager:
                     _handler(event)
 
             token = self._bus.subscribe(
-                attr.__event_spec__, wrapper,
-                priority=attr.__priority__, once=attr.__once__
+                attr.__event_spec__,
+                wrapper,
+                priority=attr.__priority__,
+                once=attr.__once__,
             )
             tokens.append(token)
         plugin._handler_tokens = tokens
@@ -379,7 +476,7 @@ class LifecycleManager:
         except Exception as e:
             logger.exception("Plugin %s run() crashed", plugin.name)
             self._set_status(plugin, PluginState.Failed, error=e)
-            entry.fw_state = PluginState.Failed   # 同步状态机
+            entry.fw_state = PluginState.Failed  # 同步状态机
             self._on_fatal(plugin.name, e)
 
     async def _do_stop(self, entry: _Entry, timeout: float) -> None:
@@ -408,3 +505,35 @@ class LifecycleManager:
         if inspect.isawaitable(result):
             return await result
         return result
+
+    def resolve_service(self, name: str, **kwargs) -> Any | None:
+        """从管理器便捷查询服务实例。
+
+        代理到内部 PluginServiceRegistry.resolve。
+
+        Args:
+            name: 服务名。
+            **kwargs: 透传给 resolve 的额外参数，如 provider、version。
+
+        Returns:
+            匹配的服务实例；若无匹配则返回 None。
+        """
+        return self._registry.resolve(name, **kwargs)
+
+    def require_service(self, name: str, **kwargs) -> Any:
+        """从管理器严格查询服务实例。
+
+        代理到内部 PluginServiceRegistry.require。
+
+        Args:
+            name: 服务名。
+            **kwargs: 透传给 require 的额外参数，如 provider、version。
+
+        Returns:
+            匹配的服务实例。
+
+        Raises:
+            ServiceNotFound: 服务不存在时。
+            VersionMismatch: 版本约束不满足时。
+        """
+        return self._registry.require(name, **kwargs)

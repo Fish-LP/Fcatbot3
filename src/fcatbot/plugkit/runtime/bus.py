@@ -1,12 +1,22 @@
-import asyncio, inspect, secrets, logging, dataclasses
+import asyncio
+import dataclasses
+import inspect
+import logging
+import secrets
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from ..protocol.bus import EventBus, EventHandler, GlobalInterceptor, HandlerInterceptor
-from ..protocol.event import Event
+from fcatbot.plugkit.protocol.bus import (
+    EventBus,
+    EventHandler,
+    GlobalInterceptor,
+    HandlerInterceptor,
+)
+from fcatbot.plugkit.protocol.event import Event
 
 logger = logging.getLogger("plugkit.bus")
+
 
 @dataclass
 class _Subscription:
@@ -16,10 +26,15 @@ class _Subscription:
     priority: int
     once: bool
 
-class BackpressureError(Exception): pass
+
+class BackpressureError(Exception):
+    pass
+
 
 class Bus(EventBus):
-    def __init__(self, *, max_queue: int = 1000, max_concurrent: int = 100, workers: int = 4):
+    def __init__(
+        self, *, max_queue: int = 1000, max_concurrent: int = 100, workers: int = 4
+    ):
         if max_queue <= 0:
             raise ValueError("max_queue must be a positive integer")
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue)
@@ -39,8 +54,14 @@ class Bus(EventBus):
     def add_handler_interceptor(self, interceptor: HandlerInterceptor) -> None:
         self._handler_interceptors.append(interceptor)
 
-    def subscribe(self, event_spec: str | type, handler: EventHandler, *,
-                  priority: int = 50, once: bool = False) -> str:
+    def subscribe(
+        self,
+        event_spec: str | type,
+        handler: EventHandler,
+        *,
+        priority: int = 50,
+        once: bool = False,
+    ) -> str:
         if self._closed:
             raise RuntimeError("Bus closed")
         token = secrets.token_hex(8)
@@ -109,7 +130,7 @@ class Bus(EventBus):
         seen: set = set()
         result: list[_Subscription] = []
 
-        if isinstance(event, Event):    # 空字符串是合法的
+        if isinstance(event, Event):  # 空字符串是合法的
             specs.append(event.name)
         elif isinstance(event, dict) and "event" in event:
             specs.append(event["event"])

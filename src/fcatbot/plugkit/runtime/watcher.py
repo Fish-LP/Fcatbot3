@@ -1,11 +1,12 @@
 from __future__ import annotations
+
 import asyncio
 import logging
 from pathlib import Path
-from typing import Callable, TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 if TYPE_CHECKING:
     from .lifecycle import LifecycleManager
@@ -14,8 +15,12 @@ logger = logging.getLogger("plugkit.watcher")
 
 
 class _DebouncedHandler(FileSystemEventHandler):
-    def __init__(self, callback: Callable[[Path], None], delay: float = 0.5,
-                 loop: asyncio.AbstractEventLoop | None = None):
+    def __init__(
+        self,
+        callback: Callable[[Path], None],
+        delay: float = 0.5,
+        loop: asyncio.AbstractEventLoop | None = None,
+    ):
         self._callback = callback
         self._delay = delay
         self._tasks: dict[str, asyncio.Task] = {}
@@ -71,7 +76,7 @@ class _DebouncedHandler(FileSystemEventHandler):
             # 兜底：如果已经在事件循环线程，直接走；否则报错
             try:
                 loop = asyncio.get_running_loop()
-                if loop.is_running():
+                if loop.is_running() and not loop.is_closed():  # is_closed 检查
                     schedule()
                 else:
                     logger.warning("No event loop available for watchdog callback")
@@ -198,7 +203,9 @@ class PluginWatcher:
         # 这里可以直接 create_task
         task = asyncio.create_task(self._safe_reload(plugin_name))
         self._reload_tasks[plugin_name] = task
-        task.add_done_callback(lambda _f, n=plugin_name: self._reload_tasks.pop(n, None))
+        task.add_done_callback(
+            lambda _f, n=plugin_name: self._reload_tasks.pop(n, None)
+        )
 
     async def _safe_reload(self, name: str):
         try:

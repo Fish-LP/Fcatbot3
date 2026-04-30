@@ -1,13 +1,13 @@
 # runtime/loader.py
-import inspect
 import importlib
 import importlib.util
+import inspect
 import sys
 import zipfile
 from pathlib import Path
-from typing import Type, Any
+from typing import Any, Type
 
-from ..protocol.plugin import Plugin
+from fcatbot.plugkit.protocol.plugin import Plugin
 
 
 class PluginLoader:
@@ -87,8 +87,9 @@ class PluginLoader:
                 spec = importlib.util.spec_from_file_location(module_name, path)
             else:
                 spec = importlib.util.spec_from_file_location(
-                    module_name, path / "__init__.py",
-                    submodule_search_locations=[str(path)]
+                    module_name,
+                    path / "__init__.py",
+                    submodule_search_locations=[str(path)],
                 )
             if spec is None:
                 raise RuntimeError(f"Cannot create module spec for {name}")
@@ -135,7 +136,7 @@ class PluginLoader:
             raise RuntimeError(f"No Plugin subclass found in {name}")
         if len(candidates) > 1:
             for c in candidates:
-                if getattr(c, 'name', None) == name:
+                if getattr(c, "name", None) == name:
                     c._plugin_source_name = name
                     return c
             candidates[0]._plugin_source_name = name

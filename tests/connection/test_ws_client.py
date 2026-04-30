@@ -13,16 +13,17 @@ import pytest
 from aiohttp import ClientSession, ClientWebSocketResponse, WSMsgType
 
 from fcatbot.connection.websocket import (
+    AioHttpWebSocketConnection,
     AsyncWebSocketClient,
     ListenerClosedError,
     ListenerEvictedError,
     MessageType,
     ReconnectionStrategy,
-    WSConnectionError,
+    SyncWebSocketClient,
     WebSocketConfig,
     WebSocketListener,
     WebSocketState,
-    AioHttpWebSocketConnection,
+    WSConnectionError,
 )
 
 
@@ -53,6 +54,7 @@ def mock_session(mock_ws: AsyncMock) -> AsyncMock:
 # WebSocketConfig
 # -----------------------------------------------------------------------------
 
+
 def test_config_defaults():
     cfg = WebSocketConfig(uri="wss://example.com/ws")
     assert cfg.uri == "wss://example.com/ws"
@@ -80,6 +82,7 @@ def test_config_compression_out_of_range():
 # -----------------------------------------------------------------------------
 # WebSocketListener
 # -----------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_listener_put_and_get():
@@ -171,6 +174,7 @@ async def test_listener_get_raises_after_close():
 # ReconnectionStrategy
 # -----------------------------------------------------------------------------
 
+
 def test_reconnect_delay_exponential():
     cfg = WebSocketConfig(
         uri="ws://localhost", backoff_base=1.0, backoff_max=10.0, jitter_factor=0
@@ -214,8 +218,11 @@ def test_reconnect_resets_on_success():
 # AioHttpWebSocketConnection
 # -----------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
-async def test_connection_connect_success(mock_session: AsyncMock, mock_ws: AsyncMock, logger: logging.Logger):
+async def test_connection_connect_success(
+    mock_session: AsyncMock, mock_ws: AsyncMock, logger: logging.Logger
+):
     with patch("fcatbot.connection.websocket.ClientSession", return_value=mock_session):
         cfg = WebSocketConfig(uri="ws://localhost")
         conn = AioHttpWebSocketConnection(cfg, logger)
@@ -228,7 +235,9 @@ async def test_connection_connect_success(mock_session: AsyncMock, mock_ws: Asyn
 
 
 @pytest.mark.asyncio
-async def test_connection_connect_failure(mock_session: AsyncMock, logger: logging.Logger):
+async def test_connection_connect_failure(
+    mock_session: AsyncMock, logger: logging.Logger
+):
     mock_session.ws_connect = AsyncMock(side_effect=OSError("Connection refused"))
 
     with patch("fcatbot.connection.websocket.ClientSession", return_value=mock_session):
@@ -243,7 +252,9 @@ async def test_connection_connect_failure(mock_session: AsyncMock, logger: loggi
 
 
 @pytest.mark.asyncio
-async def test_connection_send_str(mock_session: AsyncMock, mock_ws: AsyncMock, logger: logging.Logger):
+async def test_connection_send_str(
+    mock_session: AsyncMock, mock_ws: AsyncMock, logger: logging.Logger
+):
     with patch("fcatbot.connection.websocket.ClientSession", return_value=mock_session):
         cfg = WebSocketConfig(uri="ws://localhost")
         conn = AioHttpWebSocketConnection(cfg, logger)
@@ -256,7 +267,9 @@ async def test_connection_send_str(mock_session: AsyncMock, mock_ws: AsyncMock, 
 
 
 @pytest.mark.asyncio
-async def test_connection_send_dict(mock_session: AsyncMock, mock_ws: AsyncMock, logger: logging.Logger):
+async def test_connection_send_dict(
+    mock_session: AsyncMock, mock_ws: AsyncMock, logger: logging.Logger
+):
     with patch("fcatbot.connection.websocket.ClientSession", return_value=mock_session):
         cfg = WebSocketConfig(uri="ws://localhost")
         conn = AioHttpWebSocketConnection(cfg, logger)
@@ -269,7 +282,9 @@ async def test_connection_send_dict(mock_session: AsyncMock, mock_ws: AsyncMock,
 
 
 @pytest.mark.asyncio
-async def test_connection_receive_text(mock_session: AsyncMock, mock_ws: AsyncMock, logger: logging.Logger):
+async def test_connection_receive_text(
+    mock_session: AsyncMock, mock_ws: AsyncMock, logger: logging.Logger
+):
     fake_msg = MagicMock()
     fake_msg.type = WSMsgType.TEXT
     fake_msg.data = "hello"
@@ -288,7 +303,9 @@ async def test_connection_receive_text(mock_session: AsyncMock, mock_ws: AsyncMo
 
 
 @pytest.mark.asyncio
-async def test_connection_close(mock_session: AsyncMock, mock_ws: AsyncMock, logger: logging.Logger):
+async def test_connection_close(
+    mock_session: AsyncMock, mock_ws: AsyncMock, logger: logging.Logger
+):
     with patch("fcatbot.connection.websocket.ClientSession", return_value=mock_session):
         cfg = WebSocketConfig(uri="ws://localhost")
         conn = AioHttpWebSocketConnection(cfg, logger)
@@ -303,6 +320,7 @@ async def test_connection_close(mock_session: AsyncMock, mock_ws: AsyncMock, log
 # -----------------------------------------------------------------------------
 # AsyncWebSocketClient
 # -----------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_async_client_listener_management():
@@ -416,28 +434,31 @@ async def test_async_client_context_manager():
 # =============================================================================
 # 同步测试
 # =============================================================================
-from fcatbot.connection.websocket import SyncWebSocketClient
+
 
 def test_sync_client_start_stop(mock_session: AsyncMock, mock_ws: AsyncMock):
     async def slow_receive(*args, **kwargs):
         await asyncio.sleep(10)
         return MagicMock(type=WSMsgType.TEXT, data="never")
+
     mock_ws.receive = AsyncMock(side_effect=slow_receive)
     with patch("fcatbot.connection.websocket.ClientSession", return_value=mock_session):
         client = SyncWebSocketClient("ws://localhost", reconnect_attempts=1)
         client.start()
         assert client._running is True
-        lid = client.create_listener()
+        client.create_listener()
         client.send("test")
         metrics = client.get_metrics()
         assert metrics["running"] is True
         client.stop()
         assert client._running is False
 
+
 def test_sync_client_idempotent_start_stop(mock_session: AsyncMock, mock_ws: AsyncMock):
     async def slow_receive(*args, **kwargs):
         await asyncio.sleep(10)
         return MagicMock(type=WSMsgType.TEXT, data="never")
+
     mock_ws.receive = AsyncMock(side_effect=slow_receive)
     with patch("fcatbot.connection.websocket.ClientSession", return_value=mock_session):
         client = SyncWebSocketClient("ws://localhost", reconnect_attempts=1)
@@ -447,10 +468,12 @@ def test_sync_client_idempotent_start_stop(mock_session: AsyncMock, mock_ws: Asy
         client.stop()
         assert client._running is False
 
+
 def test_sync_client_get_message(mock_session: AsyncMock, mock_ws: AsyncMock):
     async def controlled_receive(*args, **kwargs):
         await asyncio.sleep(0.1)
         return MagicMock(type=WSMsgType.TEXT, data="sync_hello")
+
     mock_ws.receive = AsyncMock(side_effect=controlled_receive)
     with patch("fcatbot.connection.websocket.ClientSession", return_value=mock_session):
         client = SyncWebSocketClient("ws://localhost", reconnect_attempts=1)
@@ -461,10 +484,12 @@ def test_sync_client_get_message(mock_session: AsyncMock, mock_ws: AsyncMock):
         assert typ == MessageType.Text
         client.stop()
 
+
 def test_sync_client_get_message_nowait(mock_session: AsyncMock, mock_ws: AsyncMock):
     async def slow_receive(*args, **kwargs):
         await asyncio.sleep(10)
         return MagicMock(type=WSMsgType.TEXT, data="never")
+
     mock_ws.receive = AsyncMock(side_effect=slow_receive)
     with patch("fcatbot.connection.websocket.ClientSession", return_value=mock_session):
         client = SyncWebSocketClient("ws://localhost", reconnect_attempts=1)
@@ -473,10 +498,12 @@ def test_sync_client_get_message_nowait(mock_session: AsyncMock, mock_ws: AsyncM
         assert client.get_message_nowait(lid) is None
         client.stop()
 
+
 def test_sync_client_context_manager(mock_session: AsyncMock, mock_ws: AsyncMock):
     async def slow_receive(*args, **kwargs):
         await asyncio.sleep(10)
         return MagicMock(type=WSMsgType.TEXT, data="never")
+
     mock_ws.receive = AsyncMock(side_effect=slow_receive)
     with patch("fcatbot.connection.websocket.ClientSession", return_value=mock_session):
         with SyncWebSocketClient("ws://localhost", reconnect_attempts=1) as client:
