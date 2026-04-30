@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
+
 from fcatbot.plugkit.protocol.bus import EventBus
 from fcatbot.plugkit.protocol.data import PluginConfig, PluginData
 from fcatbot.plugkit.protocol.exceptions import PluginFatalError
@@ -122,6 +125,7 @@ class LifecycleManager:
                         f"'{plugin_cls.name}' is not loaded"
                     )
 
+        self._check_plugin_dependencies(plugin_cls)
         plugin = plugin_cls()
 
         # 注入
@@ -537,3 +541,46 @@ class LifecycleManager:
             VersionMismatch: 版本约束不满足时。
         """
         return self._registry.require(name, **kwargs)
+
+    def _check_plugin_dependencies(self, plugin_cls: type[Plugin]) -> None:
+        """检查插件声明的版本依赖是否满足。
+
+        Args:
+            plugin_cls: 待加载的插件类。
+
+        Raises:
+            RuntimeError: 版本约束格式非法、目标插件未声明版本号、或版本不匹配时。
+        """
+        for dep_name, constraint in plugin_cls.dependencies.items():
+            entry = self._plugins.get(dep_name)
+            if entry is None or not constraint:
+                continue
+
+            try:
+                spec = SpecifierSet(constraint)
+            except InvalidSpecifier as exc:
+                raise RuntimeError(
+                    f"插件 '{plugin_cls.name}' 对 '{dep_name}' 的版本约束 "
+                    f"'{constraint}' 格式非法"
+                ) from exc
+
+            dep_version = getattr(entry.plugin, "version", None)
+            if dep_version is None:
+                raise RuntimeError(
+                    f"插件 '{plugin_cls.name}' 依赖 '{dep_name}'，"
+                    f"但目标插件未声明版本号"
+                )
+
+            try:
+                dep_ver = Version(dep_version)
+            except InvalidVersion as exc:
+                raise RuntimeError(
+                    f"插件 '{dep_name}' 的版本号 '{dep_version}' "
+                    f"不是合法的 PEP 440 格式"
+                ) from exc
+
+            if dep_ver not in spec:
+                raise RuntimeError(
+                    f"插件 '{plugin_cls.name}' 要求 '{dep_name}{constraint}'，"
+                    f"但实际版本为 '{dep_version}'"
+                )

@@ -9,6 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Protocol
 
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
+
 
 # ---------- 异常体系 ----------
 class ServiceError(RuntimeError):
@@ -120,19 +123,18 @@ class ServiceInfo:
     def match_version(self, constraint: str) -> bool:
         """检查当前版本是否满足约束。
 
-        目前支持两种约束格式：
-        - ">=x.y.z"：当前版本大于等于指定版本。
-        - "x.y.z"：精确匹配。
-
         Args:
             constraint: 版本约束字符串。
 
         Returns:
             若满足约束则返回 True，否则返回 False。
         """
-        if constraint.startswith(">="):
-            return self._ver_tuple(self.version) >= self._ver_tuple(constraint[2:])
-        return self._ver_tuple(self.version) == self._ver_tuple(constraint)
+        try:
+            spec = SpecifierSet(constraint)
+            return Version(self.version) in spec
+        except Exception:
+            # 回退到原简单逻辑，或返回 False
+            return False
 
 
 # ---------- 监听器 ----------
