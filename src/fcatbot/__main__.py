@@ -75,7 +75,7 @@ class Bot:
             uri=url,
             headers=headers,
             logger=logging.getLogger("WS"),
-            reconnect_attempts=5,
+            reconnect_attempts=20,
         )
 
         # 以下成员在 run_async() 中初始化
@@ -168,7 +168,7 @@ class Bot:
             )
 
             try:
-                while not self._stop_event.is_set():
+                while not self._stop_event.is_set() and self._ws.running:
                     await self._cat()
                     await asyncio.sleep(0)
             except asyncio.CancelledError:
@@ -284,7 +284,9 @@ class Bot:
                     classes.append(cls)
                     log.debug("发现插件: %s", name)
                 except Exception as exc:
+                    # from fcatbot.plugkit.runtime.loader import No
                     log.warning("加载插件 %s 失败: %s", name, exc)
+                    # raise exc
         return classes
 
 

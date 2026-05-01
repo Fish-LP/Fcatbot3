@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # @Author Fish.zh@outlook.com
 # @Version 1.2
 import asyncio
@@ -855,7 +854,7 @@ class AsyncWebSocketClient:
             listener = self._listeners.get(listener_id)
 
         if not listener:
-            raise ListenerEvictedError(f"监听器 {listener_id} 未找到")
+            raise ListenerEvictedError(f"Listener {listener_id} not found")
 
         return listener
 

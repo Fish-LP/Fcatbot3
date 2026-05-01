@@ -12,7 +12,11 @@ from packaging.version import InvalidVersion, Version
 
 from fcatbot.plugkit.protocol.bus import EventBus
 from fcatbot.plugkit.protocol.data import PluginConfig, PluginData
-from fcatbot.plugkit.protocol.exceptions import PluginFatalError
+from fcatbot.plugkit.protocol.exceptions import (
+    PluginDependencyError,
+    PluginFatalError,
+    PluginStateError,
+)
 from fcatbot.plugkit.protocol.plugin import Plugin
 from fcatbot.plugkit.protocol.state import PluginState
 from fcatbot.plugkit.runtime.registry import PluginServiceRegistry
@@ -115,12 +119,12 @@ class LifecycleManager:
 
     async def _load_locked(self, plugin_cls: type[Plugin]) -> Plugin:
         if plugin_cls.name in self._plugins:
-            raise RuntimeError(f"Plugin {plugin_cls.name} already loaded")
+            raise PluginStateError(f"Plugin {plugin_cls.name} already loaded")
 
         if self._strict:
             for dep_name in plugin_cls.dependencies:
                 if dep_name not in self._plugins:
-                    raise RuntimeError(
+                    raise PluginDependencyError(
                         f"Strict mode: dependency '{dep_name}' required by "
                         f"'{plugin_cls.name}' is not loaded"
                     )
@@ -239,7 +243,7 @@ class LifecycleManager:
             external = set(cls.dependencies.keys()) - all_names - loaded_names
             if external:
                 if self._strict:
-                    raise RuntimeError(
+                    raise PluginDependencyError(
                         f"Strict mode: plugin '{cls.name}' has unloaded "
                         f"dependencies: {external}"
                     )
@@ -270,7 +274,7 @@ class LifecycleManager:
     async def _start_locked(self, name: str) -> None:
         entry = self._plugins.get(name)
         if not entry or entry.fw_state != PluginState.Loaded:
-            raise RuntimeError(f"Cannot start {name}: not Loaded")
+            raise PluginStateError(f"Cannot start {name}: not Loaded")
         plugin = entry.plugin
         await self._run_async(plugin.on_start())
         if inspect.iscoroutinefunction(plugin.run):
@@ -330,7 +334,7 @@ class LifecycleManager:
         async with self._lock:
             entry = self._plugins.get(name)
             if not entry:
-                raise RuntimeError(f"Plugin {name} not loaded")
+                raise PluginStateError(f"Plugin {name} not loaded")
             plugin_cls = type(entry.plugin)
             was_running = entry.fw_state == PluginState.Running
 
@@ -338,7 +342,7 @@ class LifecycleManager:
 
             await self._unload_locked(name)
             if not self._loader:
-                raise RuntimeError("Reload requires loader")
+                raise PluginStateError("Reload requires loader")
             source_name = getattr(plugin_cls, "_plugin_source_name", name)
             new_cls = await asyncio.to_thread(self._loader.load_class, source_name)
             plugin = await self._load_locked(new_cls)
@@ -560,7 +564,7 @@ class LifecycleManager:
             plugin_cls: 待加载的插件类。
 
         Raises:
-            RuntimeError: 版本约束格式非法、目标插件未声明版本号、或版本不匹配时。
+            PluginDependencyError: 版本约束格式非法、目标插件未声明版本号、或版本不匹配时。
         """
         for dep_name, constraint in plugin_cls.dependencies.items():
             entry = self._plugins.get(dep_name)
@@ -570,14 +574,14 @@ class LifecycleManager:
             try:
                 spec = SpecifierSet(constraint)
             except InvalidSpecifier as exc:
-                raise RuntimeError(
+                raise PluginDependencyError(
                     f"插件 '{plugin_cls.name}' 对 '{dep_name}' 的版本约束 "
                     f"'{constraint}' 格式非法"
                 ) from exc
 
             dep_version = getattr(entry.plugin, "version", None)
             if dep_version is None:
-                raise RuntimeError(
+                raise PluginDependencyError(
                     f"插件 '{plugin_cls.name}' 依赖 '{dep_name}'，"
                     f"但目标插件未声明版本号"
                 )
@@ -585,13 +589,13 @@ class LifecycleManager:
             try:
                 dep_ver = Version(dep_version)
             except InvalidVersion as exc:
-                raise RuntimeError(
+                raise PluginDependencyError(
                     f"插件 '{dep_name}' 的版本号 '{dep_version}' "
                     f"不是合法的 PEP 440 格式"
                 ) from exc
 
             if dep_ver not in spec:
-                raise RuntimeError(
+                raise PluginDependencyError(
                     f"插件 '{plugin_cls.name}' 要求 '{dep_name}{constraint}'，"
                     f"但实际版本为 '{dep_version}'"
                 )

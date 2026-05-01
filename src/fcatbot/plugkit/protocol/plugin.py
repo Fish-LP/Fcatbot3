@@ -3,6 +3,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Awaitable, ClassVar
 
+from fcatbot.plugkit.protocol.exceptions import (
+    PluginEventLoopError,
+    PluginNotLoadedError,
+)
 from fcatbot.plugkit.protocol.service import ServiceRegistry
 
 from .bus import EventBus
@@ -73,13 +77,13 @@ class Plugin(ABC):
     @property
     def bus(self) -> EventBus:
         if self._bus is None:
-            raise RuntimeError(f"Plugin {self.name} not loaded")
+            raise PluginNotLoadedError(self.name)
         return self._bus
 
     @property
     def debug(self) -> bool:
         if self._debug is None:
-            raise RuntimeError(f"Plugin {self.name} not loaded")
+            raise PluginNotLoadedError(self.name)
         return self._debug
 
     @property
@@ -97,7 +101,7 @@ class Plugin(ABC):
                 loop = None
 
         if loop is None or loop.is_closed():
-            raise RuntimeError(
+            raise PluginEventLoopError(
                 f"No active event loop to create task for plugin '{self.name}'"
             )
 
@@ -114,12 +118,12 @@ class Plugin(ABC):
 
     def get_data_path(self, name: str) -> Path:
         if self._data_root is None:
-            raise RuntimeError("Plugin not loaded")
+            raise PluginNotLoadedError(self.name)
         return self._data_root / self.name / "data" / f"{name}.yml"
 
     def get_config_path(self, name: str) -> Path:
         if self._data_root is None:
-            raise RuntimeError("Plugin not loaded")
+            raise PluginNotLoadedError(self.name)
         return self._data_root / self.name / "config" / f"{name}.yml"
 
     @property
@@ -130,8 +134,8 @@ class Plugin(ABC):
             绑定的 ServiceRegistry 实例。
 
         Raises:
-            RuntimeError: 若 LifecycleManager 尚未完成注入。
+            PluginNotLoadedError: 若 LifecycleManager 尚未完成注入。
         """
         if self._registry is None:
-            raise RuntimeError(f"Plugin '{self.name}' has no registry bound")
+            raise PluginNotLoadedError(self.name, "has no registry bound")
         return self._registry

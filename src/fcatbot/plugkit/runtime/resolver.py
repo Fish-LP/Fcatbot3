@@ -1,5 +1,7 @@
 from collections import deque
 
+from fcatbot.plugkit.protocol.exceptions import PluginDependencyError
+
 
 def resolve_load_order(graph: dict[str, set[str]]) -> list[str]:
     in_degree = {name: len(deps) for name, deps in graph.items()}
@@ -17,6 +19,6 @@ def resolve_load_order(graph: dict[str, set[str]]) -> list[str]:
 
     if len(order) != len(graph):
         remaining = set(graph.keys()) - set(order)
-        raise RuntimeError(f"Circular dependency detected among: {remaining}")
+        raise PluginDependencyError(f"Circular dependency detected among: {remaining}")
 
     return order

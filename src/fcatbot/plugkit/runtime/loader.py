@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Type
 
+from fcatbot.plugkit.protocol.exceptions import PluginLoadError
 from fcatbot.plugkit.protocol.plugin import Plugin
 
 
@@ -70,7 +71,7 @@ class PluginLoader:
     def load_class(self, name: str) -> Type[Plugin]:
         found = self._find_source(name)
         if found is None:
-            raise RuntimeError(f"Plugin module {name} not found")
+            raise PluginLoadError(name, f"module '{name}' not found")
 
         path, kind = found
 
@@ -92,7 +93,7 @@ class PluginLoader:
                     submodule_search_locations=[str(path)],
                 )
             if spec is None:
-                raise RuntimeError(f"Cannot create module spec for {name}")
+                raise PluginLoadError(name, f"cannot create module spec for '{name}'")
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
             spec.loader.exec_module(module)  # type: ignore[union-attr]
@@ -101,9 +102,9 @@ class PluginLoader:
         explicit_plugins = getattr(module, "__plugins__", None)
         if explicit_plugins is not None:
             if not isinstance(explicit_plugins, (list, tuple)):
-                raise RuntimeError(
-                    f"Plugin {name}: __plugins__ must be list or tuple, "
-                    f"got {type(explicit_plugins).__name__}"
+                raise PluginLoadError(
+                    name,
+                    f"__plugins__ must be list or tuple, got {type(explicit_plugins).__name__}",
                 )
             for cls in explicit_plugins:
                 if not isinstance(cls, type):
@@ -116,8 +117,9 @@ class PluginLoader:
                     cls._plugin_source_name = name
                     return cls
             print(explicit_plugins)
-            raise RuntimeError(
-                f"Plugin {name}: __plugins__ has no valid Plugin subclass"
+            raise PluginLoadError(
+                name,
+                "__plugins__ has no valid Plugin subclass",
             )
 
         # --- 回退：自动扫描模块内所有 Plugin 子类 ---
@@ -133,7 +135,7 @@ class PluginLoader:
                 candidates.append(obj)
 
         if not candidates:
-            raise RuntimeError(f"No Plugin subclass found in {name}")
+            raise PluginLoadError(name, "no Plugin subclass found")
         if len(candidates) > 1:
             for c in candidates:
                 if getattr(c, "name", None) == name:

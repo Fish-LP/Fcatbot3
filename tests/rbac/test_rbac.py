@@ -11,17 +11,10 @@ import pytest
 
 from fcatbot.rbac.engine import _Context, _PermissionHolder, _Role
 from fcatbot.rbac.manager import RBACManager
-from plugins.adapter.napcat.core.client import NapCatClient, set_api
 
 # ============================================================
 # Fixtures
 # ============================================================
-
-
-@pytest.fixture(autouse=True)
-def _mock_api():
-    """所有测试自动初始化 mock API，避免容器层 RuntimeError"""
-    set_api(NapCatClient("http://localhost:3000"))
 
 
 @pytest.fixture
@@ -466,6 +459,11 @@ class TestUserContainer:
         # GroupUser 群上下文黑名单可覆盖
         gu.deny("group.kick", context=_Context.of(group_id="456"))
         assert not g.check_member(gu, "group.kick")
+
+        # GroupUser 在其他群的上下文角色，不应使用自身 group_id 进行检查
+        gu2 = GroupUser(123, 789, role="member")
+        gu2.add_role(r, context=_Context.of(group_id="456"))
+        assert g.check_member(gu2, "group.kick")
 
     def test_group_check_member_int_fallback(self) -> None:
         from plugins.adapter.napcat.models.entity import Group

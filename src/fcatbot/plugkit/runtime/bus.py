@@ -14,6 +14,7 @@ from fcatbot.plugkit.protocol.bus import (
     HandlerInterceptor,
 )
 from fcatbot.plugkit.protocol.event import Event
+from fcatbot.plugkit.protocol.exceptions import BusClosedError
 
 logger = logging.getLogger("plugkit.bus")
 
@@ -63,7 +64,7 @@ class Bus(EventBus):
         once: bool = False,
     ) -> str:
         if self._closed:
-            raise RuntimeError("Bus closed")
+            raise BusClosedError("Bus closed")
         token = secrets.token_hex(8)
         sub = _Subscription(token, event_spec, handler, priority, once)
         self._subs[event_spec].append(sub)
@@ -84,7 +85,7 @@ class Bus(EventBus):
 
     async def publish(self, event: Any) -> None:
         if self._closed:
-            raise RuntimeError("Bus closed")
+            raise BusClosedError("Bus closed")
 
         if isinstance(event, Event):
             event = dataclasses.replace(event, _cancelled=False)

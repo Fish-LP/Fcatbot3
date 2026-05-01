@@ -1,4 +1,5 @@
-"""PlugKit 服务注册协议层。
+"""
+PlugKit 服务注册协议层。
 
 本模块定义了服务注册表的契约、元数据模型及异常体系。
 插件可通过声明式或命令式方式注册和消费服务。
@@ -106,32 +107,34 @@ class ServiceInfo:
     version: str = "1.0.0"
     metadata: dict = field(default_factory=dict)
 
-    @staticmethod
-    def _ver_tuple(v: str) -> tuple[int, ...]:
-        """将版本字符串转换为可比较的整数元组。
-
-        Args:
-            v: 语义版本字符串，如 "1.2.3"。
-
-        Returns:
-            整数元组，如 (1, 2, 3)。
-        """
-        return tuple(int(x) for x in v.split(".") if x.isdigit())
-
     def match_version(self, constraint: str) -> bool:
         """检查当前版本是否满足约束。
 
         Args:
             constraint: 版本约束字符串。
 
-        Returns:
+        Return:
             若满足约束则返回 True，否则返回 False。
         """
+        if not constraint or not constraint.strip():
+            return False
+
+        operators = ("==", "!=", "<=", ">=", "<", ">", "~=", "===")
+        normalized_parts = []
+
+        for part in constraint.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            # 裸版本号前自动加 ==
+            if not any(part.startswith(op) for op in operators):
+                part = f"=={part}"
+            normalized_parts.append(part)
+
         try:
-            spec = SpecifierSet(constraint)
+            spec = SpecifierSet(",".join(normalized_parts))
             return Version(self.version) in spec
         except Exception:
-            # 回退到原简单逻辑，或返回 False
             return False
 
 
@@ -222,7 +225,7 @@ class ServiceRegistry(Protocol):
         Args:
             name: 服务名。
             provider: 若指定，则只返回该插件提供的服务。
-            version: 若指定，则进行极简版本匹配。
+            version: 若指定，则进行版本匹配。
 
         Returns:
             匹配的服务实例；若无匹配则返回 None。

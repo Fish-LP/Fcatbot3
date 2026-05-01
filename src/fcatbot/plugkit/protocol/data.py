@@ -12,6 +12,7 @@ from typing import (
     overload,
 )
 
+from .exceptions import PluginDataError
 from .storage import StorageBackend, YAMLBackend
 
 T = TypeVar("T")
@@ -286,7 +287,7 @@ class PluginData(ConfigSection):
 
     def _load(self) -> None:
         if self._path is None:
-            raise RuntimeError("PluginData not bound")
+            raise PluginDataError("PluginData not bound")
         raw = self._backend.load(self._path)
         if not isinstance(raw, dict):
             raw = {}
@@ -295,7 +296,7 @@ class PluginData(ConfigSection):
 
     def save(self) -> None:
         if self._path is None:
-            raise RuntimeError("PluginData not bound")
+            raise PluginDataError("PluginData not bound")
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._backend.save(self._path, self.to_dict())
 
