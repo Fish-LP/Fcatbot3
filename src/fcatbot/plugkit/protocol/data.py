@@ -260,7 +260,6 @@ class PluginData(ConfigSection):
         self,
         name: str = "",
         *,
-        autosave: bool = False,  # 保留签名兼容旧代码，内部已废弃
         backend: StorageBackend | None = None,
     ):
         super().__init__()
@@ -308,5 +307,5 @@ class PluginData(ConfigSection):
 class PluginConfig(PluginData):
     """用户可修改的配置。强制 YAML 后端。"""
 
-    def __init__(self, name: str = "", *, autosave: bool = False):
-        super().__init__(name, autosave=autosave, backend=YAMLBackend())
+    def __init__(self, name: str = ""):
+        super().__init__(name, backend=YAMLBackend())
