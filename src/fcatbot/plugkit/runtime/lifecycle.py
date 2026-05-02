@@ -109,9 +109,9 @@ class LifecycleManager:
         mixin: type, method_name: str, plugin: Plugin, env: Any
     ) -> Any:
         """
-        @classmethod / 设计文档约定: on_mixin_load(cls, plugin, env)
+        设计文档约定: on_mixin_load(self, plugin, env)
         """
-        method = getattr(mixin, method_name, None)
+        method = getattr(plugin, method_name, None)
         if method is None:
             return None
 

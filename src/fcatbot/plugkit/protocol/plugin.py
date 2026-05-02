@@ -70,9 +70,10 @@ class PluginMixin(Protocol):
             raise PluginNotLoadedError(self.name, "has no registry bound")
         return self._registry
 
-    @classmethod
-    def on_mixin_load(cls, plugin: "Plugin", env: Any) -> None | Awaitable[None]:
+    def on_mixin_load(self, plugin: "Plugin", env: Any) -> None | Awaitable[None]:
         """插件加载时调用。
+
+        这是一个实例方法，self 是混入类在目标插件实例上的绑定实例。
 
         Args:
             plugin: 被混入的目标插件实例。
@@ -80,9 +81,10 @@ class PluginMixin(Protocol):
         """
         ...
 
-    @classmethod
-    def on_mixin_unload(cls, plugin: "Plugin", env: Any) -> None | Awaitable[None]:
+    def on_mixin_unload(self, plugin: "Plugin", env: Any) -> None | Awaitable[None]:
         """插件卸载时调用。
+
+        这是一个实例方法，self 是混入类在目标插件实例上的绑定实例。
 
         Args:
             plugin: 被混入的目标插件实例。

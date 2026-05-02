@@ -235,3 +235,5 @@ NapCat/steam_api.pyi.txt
 totp.py
 plugins.zip
 plugins.txt
+src/fcatbot/plugkit/runtime/lifecycle.py
+fcatbot3.txt
