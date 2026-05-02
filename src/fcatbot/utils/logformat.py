@@ -1,318 +1,371 @@
+from datetime import datetime
+
 from fcatbot.utils.color import Color
 
 
 class LogFormats:
-    """日志格式系统 - 提供多种实用风格"""
+    """日志格式系统 - 按风格分类，每种风格支持 message / notice / request / meta_event。
 
-    # ================ 简洁实用风格 ================
+    调用方式：
+        LogFormats.Modern.message(...)
+        LogFormats.Simple.notice(...)
+        LogFormats.Professional.meta_event(...)
+    """
 
-    @staticmethod
-    def simple(group_id, nick, uid, msg, group_name=None):
-        """极简风格 - 最高效"""
-        if group_id:
+    # ==================== 现代风格 ====================
+    class Modern:
+        """现代风格 - 简洁美观，使用 • 和 ▸ 作为视觉锚点。"""
+
+        @staticmethod
+        def message(group_id, nick, uid, msg, group_name=None):
+            """群聊/私聊消息"""
+            if group_id:
+                return (
+                    f"{Color.Green}{group_name or f'G{group_id}'}{Color.Reset} "
+                    f"{Color.Gray}• {Color.Yellow}{nick} "
+                    f"{Color.Gray}({uid}){Color.Cyan} ▸ {Color.Reset}{msg}{Color.Reset}"
+                )
             return (
-                f"{Color.Green}{group_name or f'G{group_id}'}{Color.Reset} | "
+                f"{Color.Yellow}{nick} "
+                f"{Color.Gray}({uid}){Color.Magenta} ▸ {Color.Reset}{msg}{Color.Reset}"
+            )
+
+        @staticmethod
+        def notice(
+            notice_type, user_id=None, group_id=None, group_name=None, detail=""
+        ):
+            """通知事件"""
+            loc = (
+                (
+                    f"{Color.Green}{group_name or f'G{group_id}'}{Color.Reset} "
+                    f"{Color.Gray}• {Color.Yellow}{notice_type} "
+                    f"{Color.Gray}({user_id or '-'}){Color.Reset}"
+                )
+                if group_id
+                else (
+                    f"{Color.Yellow}{notice_type}{Color.Gray} "
+                    f"({user_id or '-'}){Color.Reset}"
+                )
+            )
+            detail_str = f"{Color.Gray} ▸ {Color.Reset}{detail}" if detail else ""
+            return f"{Color.Blue}[NOTICE]{Color.Reset} {loc}{detail_str}"
+
+        @staticmethod
+        def request(request_type, user_id, comment=""):
+            """请求事件"""
+            detail = f"{Color.Gray} ▸ {Color.Reset}{comment}" if comment else ""
+            return (
+                f"{Color.Magenta}[REQUEST]{Color.Reset} "
+                f"{Color.Yellow}{request_type}{Color.Gray} ({user_id}){Color.Reset}"
+                f"{detail}"
+            )
+
+        @staticmethod
+        def meta_event(sub_type, detail="", self_id=None):
+            """元事件"""
+            prefix = f"Bot.{self_id} " if self_id else ""
+            detail_str = (
+                f"{Color.Gray} ▸ {Color.Reset}{prefix}{detail}"
+                if (detail or self_id)
+                else ""
+            )
+            return (
+                f"{Color.Gray}[META]{Color.Reset} "
+                f"{Color.Yellow}{sub_type}{Color.Reset}{detail_str}"
+            )
+
+    # ==================== 极简风格 ====================
+    class Simple:
+        """极简风格 - 最高效，最少字符。"""
+
+        @staticmethod
+        def message(group_id, nick, uid, msg, group_name=None):
+            if group_id:
+                return (
+                    f"{Color.Green}{group_name or f'G{group_id}'}{Color.Reset} | "
+                    f"{Color.Yellow}{nick}{Color.Gray}({uid}){Color.Reset}: {msg}"
+                )
+            return (
+                f"{Color.Magenta}PM{Color.Reset} | "
                 f"{Color.Yellow}{nick}{Color.Gray}({uid}){Color.Reset}: {msg}"
             )
-        return (
-            f"{Color.Magenta}PM{Color.Reset} | "
-            f"{Color.Yellow}{nick}{Color.Gray}({uid}){Color.Reset}: {Color.Cyan}{msg}{Color.Reset}"
-        )
 
-    @staticmethod
-    def tag(group_id, nick, uid, msg, group_name=None):
-        """标签风格 - 清晰明确"""
-        if group_id:
+        @staticmethod
+        def notice(
+            notice_type, user_id=None, group_id=None, group_name=None, detail=""
+        ):
+            src = group_name or (f"G{group_id}" if group_id else "-")
             return (
-                f"{Color.Gray}[{Color.Green}GROUP{Color.Gray}] "
-                f"{Color.Blue}{group_name}{Color.Gray}: "
-                f"{Color.Yellow}{nick}{Color.Gray}[{uid}]{Color.Reset} » {msg}"
+                f"{Color.Blue}[N]{Color.Reset} {Color.Yellow}{notice_type}{Color.Reset} | "
+                f"{Color.Green}{src}{Color.Reset} | "
+                f"{Color.Gray}{user_id or '-'}{Color.Reset} | {detail}"
             )
-        return (
-            f"{Color.Gray}[{Color.Magenta}PRIVATE{Color.Gray}] "
-            f"{Color.Yellow}{nick}{Color.Gray}[{uid}]{Color.Reset} » {Color.Cyan}{msg}{Color.Reset}"
-        )
 
-    # ================ 专业风格 ================
-
-    @staticmethod
-    def professional(group_id, nick, uid, msg, group_name=None):
-        """专业风格 - 适合监控"""
-        from datetime import datetime
-
-        timestamp = datetime.now().strftime("%H:%M:%S")
-
-        if group_id:
+        @staticmethod
+        def request(request_type, user_id, comment=""):
             return (
-                f"{Color.Gray}{timestamp} {Color.Green}[GRP]{Color.Reset} "
-                f"{Color.White}{group_name:<15} {Color.Yellow}{nick:<10} "
-                f"{Color.Gray}({uid}){Color.Reset} : {msg}"
+                f"{Color.Magenta}[R]{Color.Reset} {Color.Yellow}{request_type}{Color.Reset} | "
+                f"{Color.Gray}{user_id}{Color.Reset} | {comment}"
             )
-        return (
-            f"{Color.Gray}{timestamp} {Color.Magenta}[PVT]{Color.Reset} "
-            f"{Color.Yellow}{nick:<10} {Color.Gray}({uid}){Color.Reset} : {Color.Cyan}{msg}{Color.Reset}"
-        )
 
-    @staticmethod
-    def network(group_id, nick, uid, msg, group_name=None):
-        """网络风格 - 类似网络包格式"""
-        if group_id:
+        @staticmethod
+        def meta_event(sub_type, detail="", self_id=None):
+            sid = f"Bot.{self_id} " if self_id else ""
             return (
-                f"{Color.Cyan}GROUP:{Color.Green}{group_name} "
-                f"{Color.Gray}[ID:{group_id}] {Color.Yellow}{nick} "
-                f"{Color.Gray}<{uid}>{Color.White} > {msg}{Color.Reset}"
+                f"{Color.Gray}[M]{Color.Reset} {Color.Yellow}{sub_type}{Color.Reset} | "
+                f"{sid}{detail}"
             )
-        return (
-            f"{Color.Magenta}PRIVATE {Color.Yellow}{nick} "
-            f"{Color.Gray}<{uid}>{Color.White} >> {Color.Cyan}{msg}{Color.Reset}"
-        )
 
-    # ================ 开发调试风格 ================
+    # ==================== 专业风格 ====================
+    class Professional:
+        """专业风格 - 带时间戳，固定宽度对齐，适合监控。"""
 
-    @staticmethod
-    def debug(group_id, nick, uid, msg, group_name=None):
-        """调试风格 - 详细信息"""
-        from datetime import datetime
+        @staticmethod
+        def _timestamp():
+            return datetime.now().strftime("%H:%M:%S")
 
-        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-
-        if group_id:
+        @staticmethod
+        def message(group_id, nick, uid, msg, group_name=None):
+            ts = LogFormats.Professional._timestamp()
+            if group_id:
+                return (
+                    f"{Color.Gray}{ts} {Color.Green}[MSG]{Color.Reset} "
+                    f"{Color.White}{group_name or f'G{group_id}':<15} {Color.Yellow}{nick:<10} "
+                    f"{Color.Gray}({uid}){Color.Reset} : {msg}"
+                )
             return (
-                f"{Color.Gray}{timestamp} | "
-                f"{Color.Blue}Type:Group{Color.Reset} | "
-                f"{Color.Green}Name:{group_name}{Color.Reset} | "
+                f"{Color.Gray}{ts} {Color.Magenta}[PVT]{Color.Reset} "
+                f"{Color.Yellow}{nick:<10} {Color.Gray}({uid}){Color.Reset} : {msg}"
+            )
+
+        @staticmethod
+        def notice(
+            notice_type, user_id=None, group_id=None, group_name=None, detail=""
+        ):
+            ts = LogFormats.Professional._timestamp()
+            src = group_name or (f"G{group_id}" if group_id else "Private")
+            return (
+                f"{Color.Gray}{ts} {Color.Blue}[NTC]{Color.Reset} "
+                f"{Color.Yellow}{notice_type:<12} {Color.White}{src:<15} "
+                f"{Color.Gray}({user_id or '-':>10}){Color.Reset} : {detail}"
+            )
+
+        @staticmethod
+        def request(request_type, user_id, comment=""):
+            ts = LogFormats.Professional._timestamp()
+            return (
+                f"{Color.Gray}{ts} {Color.Magenta}[REQ]{Color.Reset} "
+                f"{Color.Yellow}{request_type:<10} {Color.Gray}({user_id:>10}){Color.Reset} : {comment}"
+            )
+
+        @staticmethod
+        def meta_event(sub_type, detail="", self_id=None):
+            ts = LogFormats.Professional._timestamp()
+            sid = f"Bot.{self_id} " if self_id else ""
+            return (
+                f"{Color.Gray}{ts} {Color.Gray}[MET]{Color.Reset} "
+                f"{Color.Yellow}{sub_type:<12}{Color.Reset} : {sid}{detail}"
+            )
+
+    # ==================== 调试风格 ====================
+    class Debug:
+        """调试风格 - 字段完整，带毫秒时间戳。"""
+
+        @staticmethod
+        def _timestamp():
+            return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+        @staticmethod
+        def message(group_id, nick, uid, msg, group_name=None):
+            ts = LogFormats.Debug._timestamp()
+            if group_id:
+                return (
+                    f"{Color.Gray}{ts} | {Color.Blue}Type:Group{Color.Reset} | "
+                    f"{Color.Green}Name:{group_name}{Color.Reset} | "
+                    f"{Color.Yellow}User:{nick}{Color.Reset} | "
+                    f"{Color.Cyan}UID:{uid}{Color.Reset} | "
+                    f"{Color.White}Msg:{msg}{Color.Reset}"
+                )
+            return (
+                f"{Color.Gray}{ts} | {Color.Magenta}Type:Private{Color.Reset} | "
                 f"{Color.Yellow}User:{nick}{Color.Reset} | "
                 f"{Color.Cyan}UID:{uid}{Color.Reset} | "
-                f"{Color.White}Msg:{msg}{Color.Reset}"
+                f"{Color.Green}Msg:{msg}{Color.Reset}"
             )
-        return (
-            f"{Color.Gray}{timestamp} | "
-            f"{Color.Magenta}Type:Private{Color.Reset} | "
-            f"{Color.Yellow}User:{nick}{Color.Reset} | "
-            f"{Color.Cyan}UID:{uid}{Color.Reset} | "
-            f"{Color.Green}Msg:{msg}{Color.Reset}"
-        )
 
-    @staticmethod
-    def minimal(group_id, nick, uid, msg, group_name=None):
-        """最小化风格 - 最少字符"""
-        if group_id:
-            return f"{Color.Green}G{Color.Reset} {nick}: {msg}"
-        return f"{Color.Magenta}P{Color.Reset} {nick}: {msg}"
-
-    # ================ 层次结构风格 ================
-
-    @staticmethod
-    def hierarchical(group_id, nick, uid, msg, group_name=None):
-        """层次结构风格 - 适合大量消息"""
-        if group_id:
+        @staticmethod
+        def notice(
+            notice_type, user_id=None, group_id=None, group_name=None, detail=""
+        ):
+            ts = LogFormats.Debug._timestamp()
             return (
-                f"{Color.Cyan}└─ {Color.Green}{group_name}{Color.Reset}\n"
-                f"    {Color.Yellow}├─ {nick}{Color.Gray} ({uid}){Color.Reset}\n"
-                f"    {Color.White}└─ {msg}{Color.Reset}"
+                f"{Color.Gray}{ts} | {Color.Blue}Type:Notice{Color.Reset} | "
+                f"{Color.Yellow}SubType:{notice_type}{Color.Reset} | "
+                f"{Color.Cyan}User:{user_id or '-'}{Color.Reset} | "
+                f"{Color.Green}Group:{group_id or '-'}{Color.Reset} | "
+                f"{Color.White}Data:{detail}{Color.Reset}"
             )
-        return (
-            f"{Color.Magenta}├─ {Color.Yellow}{nick}{Color.Gray} ({uid}){Color.Reset}\n"
-            f"{Color.Magenta}└─ {Color.Cyan}{msg}{Color.Reset}"
-        )
 
-    @staticmethod
-    def segment(group_id, nick, uid, msg, group_name=None):
-        """分段风格 - 视觉分隔"""
-        if group_id:
+        @staticmethod
+        def request(request_type, user_id, comment=""):
+            ts = LogFormats.Debug._timestamp()
             return (
-                f"{Color.Cyan}╞ {Color.Green}{group_name} {Color.Gray}[{group_id}]{Color.Reset}\n"
-                f"{Color.Cyan}╞ {Color.Yellow}{nick} {Color.Gray}<{uid}>{Color.Reset}\n"
-                f"{Color.Cyan}╰─ {Color.White}{msg}{Color.Reset}"
+                f"{Color.Gray}{ts} | {Color.Magenta}Type:Request{Color.Reset} | "
+                f"{Color.Yellow}SubType:{request_type}{Color.Reset} | "
+                f"{Color.Cyan}User:{user_id}{Color.Reset} | "
+                f"{Color.White}Comment:{comment}{Color.Reset}"
             )
-        return (
-            f"{Color.Magenta}╞ {Color.Yellow}{nick} {Color.Gray}<{uid}>{Color.Reset}\n"
-            f"{Color.Magenta}╰─ {Color.Cyan}{msg}{Color.Reset}"
-        )
 
-    # ================ 数据表格风格 ================
-
-    @staticmethod
-    def table(group_id, nick, uid, msg, group_name=None):
-        """表格风格 - 对齐美观"""
-        if group_id:
+        @staticmethod
+        def meta_event(sub_type, detail="", self_id=None):
+            ts = LogFormats.Debug._timestamp()
+            sid = f"SelfID:{self_id} " if self_id else ""
             return (
-                f"{Color.Cyan}│ {Color.Green}{str(group_name)[:20]:<20} "
-                f"{Color.Yellow}│ {nick[:12]:<12} "
-                f"{Color.Blue}│ {uid:<10} "
-                f"{Color.White}│ {msg[:40]}{Color.Reset}"
+                f"{Color.Gray}{ts} | {Color.Gray}Type:Meta{Color.Reset} | "
+                f"{Color.Yellow}SubType:{sub_type}{Color.Reset} | "
+                f"{sid}{Color.White}Data:{detail}{Color.Reset}"
             )
-        return (
-            f"{Color.Magenta}│ {Color.Yellow}{'Private':<20} "
-            f"{Color.Yellow}│ {nick[:12]:<12} "
-            f"{Color.Cyan}│ {uid:<10} "
-            f"{Color.Green}│ {msg[:40]}{Color.Reset}"
-        )
 
-    @staticmethod
-    def table_header():
-        """表格标题"""
-        return (
-            f"{Color.Cyan}├{'─'*80}┤{Color.Reset}\n"
-            f"{Color.Cyan}│ {Color.White}{'Source':<20} {'User':<12} {'ID':<10} {'Message':<38}{Color.Cyan} │{Color.Reset}\n"
-            f"{Color.Cyan}├{'─'*80}┤{Color.Reset}"
-        )
+    # ==================== 协议风格 ====================
+    class Protocol:
+        """协议风格 - 类似网络协议键值对格式，多行结构化。"""
 
-    # ================ 状态机风格 ================
-
-    @staticmethod
-    def state_machine(group_id, nick, uid, msg, group_name=None):
-        """状态机风格 - 显示处理流程"""
-        if group_id:
-            return (
-                f"{Color.Gray}[RECV] {Color.Green}[GROUP] "
-                f"{Color.White}← {Color.Yellow}{nick} "
-                f"{Color.Gray}({uid}) {Color.White}@ {Color.Cyan}{group_name}"
-                f"{Color.Gray} → {Color.White}{msg[:50]}...{Color.Reset}"
-            )
-        return (
-            f"{Color.Gray}[RECV] {Color.Magenta}[PRIVATE] "
-            f"{Color.White}← {Color.Yellow}{nick} "
-            f"{Color.Gray}({uid}){Color.Gray} → {Color.Cyan}{msg[:50]}...{Color.Reset}"
-        )
-
-    # ================ 通信协议风格 ================
-
-    @staticmethod
-    def protocol(group_id, nick, uid, msg, group_name=None):
-        """协议风格 - 类似网络协议格式"""
-        msg_len = len(str(msg))
-        if group_id:
+        @staticmethod
+        def message(group_id, nick, uid, msg, group_name=None):
+            msg_len = len(str(msg))
+            if group_id:
+                return (
+                    f"{Color.Gray}[MESSAGE]{Color.Reset}\n"
+                    f"{Color.Blue}  TYPE:   GROUP{Color.Reset}\n"
+                    f"{Color.Green}  FROM:   {nick}{Color.Reset}\n"
+                    f"{Color.Cyan}  UID:    {uid}{Color.Reset}\n"
+                    f"{Color.Yellow}  GROUP:  {group_name or group_id}{Color.Reset}\n"
+                    f"{Color.White}  LENGTH: {msg_len}{Color.Reset}\n"
+                    f"{Color.Magenta}  DATA:   {msg}{Color.Reset}"
+                )
             return (
                 f"{Color.Gray}[MESSAGE]{Color.Reset}\n"
-                f"{Color.Blue}  TYPE:   GROUP{Color.Reset}\n"
+                f"{Color.Blue}  TYPE:   PRIVATE{Color.Reset}\n"
                 f"{Color.Green}  FROM:   {nick}{Color.Reset}\n"
                 f"{Color.Cyan}  UID:    {uid}{Color.Reset}\n"
-                f"{Color.Yellow}  GROUP:  {group_name}{Color.Reset}\n"
                 f"{Color.White}  LENGTH: {msg_len}{Color.Reset}\n"
-                f"{Color.Magenta}  DATA:   {msg[:60]}{Color.Reset}"
+                f"{Color.Magenta}  DATA:   {msg}{Color.Reset}"
             )
-        return (
-            f"{Color.Gray}[MESSAGE]{Color.Reset}\n"
-            f"{Color.Blue}  TYPE:   PRIVATE{Color.Reset}\n"
-            f"{Color.Green}  FROM:   {nick}{Color.Reset}\n"
-            f"{Color.Cyan}  UID:    {uid}{Color.Reset}\n"
-            f"{Color.White}  LENGTH: {msg_len}{Color.Reset}\n"
-            f"{Color.Magenta}  DATA:   {msg[:60]}{Color.Reset}"
-        )
 
-    # ================ 现代化风格 ================
-
-    @staticmethod
-    def modern(group_id, nick, uid, msg, group_name=None):
-        """现代风格 - 简洁美观"""
-        if group_id:
+        @staticmethod
+        def notice(
+            notice_type, user_id=None, group_id=None, group_name=None, detail=""
+        ):
             return (
-                f"{Color.Reset}{Color.Green}{group_name} "
-                f"{Color.Gray}• {Color.Yellow}{nick} "
-                f"{Color.Gray}({uid}){Color.Cyan} ▸ {Color.Reset}{msg}{Color.Reset}"
+                f"{Color.Gray}[NOTICE]{Color.Reset}\n"
+                f"{Color.Blue}  TYPE:   {notice_type}{Color.Reset}\n"
+                f"{Color.Green}  USER:   {user_id or '-'}{Color.Reset}\n"
+                f"{Color.Yellow}  GROUP:  {group_name or group_id or '-'}{Color.Reset}\n"
+                f"{Color.White}  DATA:   {detail}{Color.Reset}"
             )
-        return (
-            f"{Color.Reset}{Color.Yellow}{nick} "
-            f"{Color.Gray}({uid}){Color.Magenta} ▸ {Color.Reset}{msg}{Color.Reset}"
-        )
 
-    @staticmethod
-    def compact(group_id, nick, uid, msg, group_name=None):
-        """紧凑风格 - 节省空间"""
-        if group_id:
-            return f"{Color.Green}G{Color.Reset}:{Color.Yellow}{nick[:6]}{Color.Reset}:{msg[:40]}"
-        return f"{Color.Magenta}P{Color.Reset}:{Color.Yellow}{nick[:6]}{Color.Reset}:{msg[:40]}"
+        @staticmethod
+        def request(request_type, user_id, comment=""):
+            return (
+                f"{Color.Gray}[REQUEST]{Color.Reset}\n"
+                f"{Color.Blue}  TYPE:    {request_type}{Color.Reset}\n"
+                f"{Color.Green}  USER:    {user_id}{Color.Reset}\n"
+                f"{Color.White}  COMMENT: {comment}{Color.Reset}"
+            )
 
-    # ================ 特殊场景风格 ================
+        @staticmethod
+        def meta_event(sub_type, detail="", self_id=None):
+            sid = f"  SELF:    {self_id}\n" if self_id else ""
+            return (
+                f"{Color.Gray}[META_EVENT]{Color.Reset}\n"
+                f"{Color.Blue}  TYPE:    {sub_type}{Color.Reset}\n"
+                f"{sid}"
+                f"{Color.White}  DATA:    {detail}{Color.Reset}"
+            )
 
-    @staticmethod
-    def highlight(group_id, nick, uid, msg, group_name=None, highlight_words=None):
-        """高亮风格 - 关键词高亮"""
-        if highlight_words is None:
-            highlight_words = []
+    # ==================== 标签风格 ====================
+    class Tag:
+        """标签风格 - 方括号类型标识，清晰明确。"""
 
-        highlighted_msg = str(msg)
-        for word in highlight_words:
-            if word in highlighted_msg:
-                highlighted_msg = highlighted_msg.replace(
-                    word, f"{Color.Red}{word}{Color.Reset}"
+        @staticmethod
+        def message(group_id, nick, uid, msg, group_name=None):
+            if group_id:
+                return (
+                    f"{Color.Gray}[{Color.Green}GROUP{Color.Gray}] "
+                    f"{Color.Blue}{group_name or f'G{group_id}'}{Color.Gray}: "
+                    f"{Color.Yellow}{nick}{Color.Gray}[{uid}]{Color.Reset} » {msg}"
                 )
-
-        if group_id:
             return (
-                f"{Color.Green}⚠ {group_name}{Color.Reset} | "
-                f"{Color.Yellow}{nick}{Color.Reset} | {highlighted_msg}"
+                f"{Color.Gray}[{Color.Magenta}PRIVATE{Color.Gray}] "
+                f"{Color.Yellow}{nick}{Color.Gray}[{uid}]{Color.Reset} » {msg}"
             )
-        return (
-            f"{Color.Magenta}⚠ PRIVATE{Color.Reset} | "
-            f"{Color.Yellow}{nick}{Color.Reset} | {highlighted_msg}"
-        )
 
-    @staticmethod
-    def priority(group_id, nick, uid, msg, group_name=None, priority="NORMAL"):
-        """优先级风格 - 根据重要性显示"""
-        priority_colors = {
-            "HIGH": Color.Red,
-            "MEDIUM": Color.Yellow,
-            "NORMAL": Color.Green,
-            "LOW": Color.Blue,
-        }
-        color = priority_colors.get(priority, Color.White)
-
-        if group_id:
+        @staticmethod
+        def notice(
+            notice_type, user_id=None, group_id=None, group_name=None, detail=""
+        ):
+            src = group_name or (f"G{group_id}" if group_id else "PRIVATE")
             return (
-                f"{color}[{priority}] {Color.Green}{group_name}{Color.Reset} | "
-                f"{Color.Yellow}{nick}{Color.Reset}: {msg}"
+                f"{Color.Gray}[{Color.Blue}NOTICE{Color.Gray}] "
+                f"{Color.Yellow}{notice_type}{Color.Gray}: "
+                f"{Color.Green}{src}{Color.Gray}[{user_id or '-'}]{Color.Reset} » {detail}"
             )
-        return (
-            f"{color}[{priority}] {Color.Magenta}PRIVATE{Color.Reset} | "
-            f"{Color.Yellow}{nick}{Color.Reset}: {msg}"
-        )
+
+        @staticmethod
+        def request(request_type, user_id, comment=""):
+            return (
+                f"{Color.Gray}[{Color.Magenta}REQUEST{Color.Gray}] "
+                f"{Color.Yellow}{request_type}{Color.Gray}: "
+                f"{Color.Gray}[{user_id}]{Color.Reset} » {comment}"
+            )
+
+        @staticmethod
+        def meta_event(sub_type, detail="", self_id=None):
+            sid = f"[{self_id}] " if self_id else ""
+            return (
+                f"{Color.Gray}[{Color.Gray}META{Color.Gray}] "
+                f"{Color.Yellow}{sub_type}{Color.Gray}: "
+                f"{sid}{Color.Reset}» {detail}"
+            )
 
 
-# ================ 风格预览函数 ================
+# ================ 预览函数 ================
 def preview_all_styles():
-    """预览所有日志风格"""
+    """预览所有保留风格"""
     print(f"{Color.White}{Color.Bold}=== 日志风格预览 ==={Color.Reset}\n")
 
-    test_cases = [
-        ("群聊消息示例", "User123", 10001, "这是一个测试消息", "测试群组"),
-        ("私聊消息示例", "Friend456", 20002, "你好，这是一个私聊测试", None),
-    ]
+    test_msg = ("User123", 10001, "这是一个测试消息", "测试群组")
+    test_notice = ("group_upload", 10001, 123456, "测试群组", "file=xxx.zip")
+    test_request = ("friend", 20002, "你好，请求加好友")
+    test_meta = ("lifecycle", "Bot.123456789 上线", "123456789")
 
     styles = [
-        ("simple", "极简风格"),
-        ("tag", "标签风格"),
-        ("professional", "专业风格"),
-        ("network", "网络风格"),
-        ("debug", "调试风格"),
-        ("minimal", "最小化风格"),
-        ("hierarchical", "层次结构风格"),
-        ("segment", "分段风格"),
-        ("table", "表格风格"),
-        ("state_machine", "状态机风格"),
-        ("protocol", "协议风格"),
-        ("modern", "现代风格"),
-        ("compact", "紧凑风格"),
+        ("Modern", "现代风格"),
+        ("Simple", "极简风格"),
+        ("Professional", "专业风格"),
+        ("Debug", "调试风格"),
+        ("Protocol", "协议风格"),
+        ("Tag", "标签风格"),
     ]
 
     for style_name, style_desc in styles:
         print(f"{Color.Cyan}{style_desc} ({style_name}):{Color.Reset}")
+        Style = getattr(LogFormats, style_name)
 
-        for case_name, nick, uid, msg, group_name in test_cases:
-            if group_name:
-                log_text = getattr(LogFormats, style_name)(
-                    123, nick, uid, msg, group_name
-                )
-            else:
-                log_text = getattr(LogFormats, style_name)(None, nick, uid, msg)
+        print(f"  {Color.Gray}message:{Color.Reset}")
+        print(f"    {Style.message(123, *test_msg)}")
 
-            print(f"  {log_text}")
+        print(f"  {Color.Gray}notice:{Color.Reset}")
+        print(f"    {Style.notice(*test_notice)}")
+
+        print(f"  {Color.Gray}request:{Color.Reset}")
+        print(f"    {Style.request(*test_request)}")
+
+        print(f"  {Color.Gray}meta_event:{Color.Reset}")
+        print(f"    {Style.meta_event(*test_meta)}")
 
         print()
 
 
-# 可以运行预览
 if __name__ == "__main__":
     preview_all_styles()

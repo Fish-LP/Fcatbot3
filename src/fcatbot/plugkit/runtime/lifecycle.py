@@ -162,6 +162,7 @@ class LifecycleManager:
                     await self._run_async(
                         self._call_mixin_method(mixin, "on_mixin_load", plugin, env)
                     )
+            await self._bind_data(plugin)  # 二次绑定处理 on_mixin_load 动态添加的配置
 
             await self._run_async(plugin.on_load())
             await self._bind_data(plugin)  # 二次绑定处理 on_load 动态添加的配置
