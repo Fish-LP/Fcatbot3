@@ -233,6 +233,5 @@ NapCat/steam_api.py
 NapCat/steam_api.pyi
 NapCat/steam_api.pyi.txt
 totp.py
-.pre-commit-config.yaml
 plugins.zip
 plugins.txt
