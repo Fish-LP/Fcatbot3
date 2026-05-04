@@ -396,6 +396,11 @@ class LifecycleManager:
                 logger.exception("Config hook failed: %s.%s", plugin_name, attr_name)
             return
 
+    def request_shutdown(self) -> None:
+        """请求终止 serve() 的阻塞等待，触发优雅关闭。"""
+        if self._fatal_error is not None and not self._fatal_error.done():
+            self._fatal_error.cancel()
+
     async def serve(self) -> None:
         loop = asyncio.get_running_loop()
         self._fatal_error = loop.create_future()
@@ -407,10 +412,10 @@ class LifecycleManager:
             await self._fatal_error
         except asyncio.CancelledError:
             logger.info("Serve cancelled, initiating shutdown...")
+            raise  # 向上传播
         finally:
             if self._watcher:
                 self._watcher.stop()
-            await self.shutdown()
 
     def _on_fatal(self, plugin_name: str, error: Exception) -> None:
         if self._fatal_error and not self._fatal_error.done():

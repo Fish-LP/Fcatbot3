@@ -16,7 +16,7 @@ import re
 import warnings
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from logging.handlers import QueueHandler, QueueListener, TimedRotatingFileHandler
+from logging.handlers import QueueListener, TimedRotatingFileHandler
 from queue import Queue
 from typing import Any, Dict, List, Optional, Union, cast
 
@@ -358,16 +358,30 @@ def setup_logging(config: Optional[LogConfig] = None) -> Optional[QueueListener]
         logger.propagate = False
 
     if config.queue_size > 0:
+        from logging.handlers import QueueHandler, QueueListener
+        from queue import Queue
+
         log_queue: Queue = Queue(maxsize=config.queue_size)
         queue_handler = QueueHandler(log_queue)
-        listeners_handlers = [
-            h for h in root.handlers if not isinstance(h, QueueHandler)
-        ]
-        root.handlers = [queue_handler]
 
-        listener = QueueListener(
-            log_queue, *listeners_handlers, respect_handler_level=True
-        )
+        # 精确区分：FileHandler（文件日志）走后台线程，
+        # StreamHandler（控制台）留在 root 同步输出，供 patch_stdout 捕获
+        console_handlers: list[logging.Handler] = [
+            h
+            for h in root.handlers
+            if isinstance(h, logging.StreamHandler)
+            and not isinstance(h, logging.FileHandler)
+        ]
+        file_handlers: list[logging.Handler] = [
+            h for h in root.handlers if isinstance(h, logging.FileHandler)
+        ]
+
+        root.handlers.clear()
+        for h in console_handlers:
+            root.handlers.append(h)
+        root.handlers.append(queue_handler)
+
+        listener = QueueListener(log_queue, *file_handlers, respect_handler_level=True)
         listener.start()
         return listener
 

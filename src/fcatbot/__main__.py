@@ -6,14 +6,13 @@ from pathlib import Path
 from typing import ClassVar, Optional
 
 from fcatbot.connection.websocket import AsyncWebSocketClient, ListenerId
+from fcatbot.console import ConsoleApp, PromptToolkitConsole, attach_console
 from fcatbot.plugkit.protocol.event import Event
 from fcatbot.plugkit.protocol.plugin import Plugin
 from fcatbot.plugkit.runtime.bus import Bus
 from fcatbot.plugkit.runtime.lifecycle import LifecycleManager
 from fcatbot.plugkit.runtime.loader import PluginLoader
-from fcatbot.utils.logger import setup_logging
 
-setup_logging()
 log = logging.getLogger("Bot")
 
 
@@ -93,27 +92,22 @@ class Bot:
         self._listener_id: Optional[ListenerId] = None
         self._stop_event = asyncio.Event()
 
+        # ---------- 控制台组件 ----------
+        self._console: Optional[ConsoleApp] = None
+        self._console_ui: Optional[PromptToolkitConsole] = None
+
     # ==================== 同步入口 ====================
 
     def run(self) -> None:
-        """阻塞式启动，支持嵌套事件循环。"""
-
-        logging.basicConfig(
-            level=logging.DEBUG if self.debug else logging.INFO,
-            format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-            stream=sys.stdout,
-        )
-
         async def _runner() -> None:
             try:
                 await self.run_async()
-                await self._stop_event.wait()  # 等 stop() 或 finally 里 set
+                # run_async 结束后 _stop_event 已 set，wait 立即返回
+                await self._stop_event.wait()
             except asyncio.CancelledError:
                 log.info("Bot 任务被取消")
             except Exception:
                 log.exception("Bot 运行异常")
-            finally:
-                await self.stop()
 
         try:
             loop = asyncio.get_running_loop()
@@ -147,7 +141,7 @@ class Bot:
                 plugin_dirs=self._plugin_dirs,
             )
 
-            # 注册到注册表
+            # 注册核心服务
             self._plugin_manager._registry.register(
                 name="bot.ws.connection",
                 instance=ConnectionService(self._ws),
@@ -155,6 +149,20 @@ class Bot:
                 version=ConnectionService.version,
             )
 
+            # 注册控制台服务
+            self._console = ConsoleApp(self)
+            self._plugin_manager._registry.register(
+                name="console.app",
+                instance=self._console,
+                provider="Bot",
+                version="1.0.0",
+            )
+
+            # 启动交互式控制台
+            self._console_ui = attach_console(self, self._console)
+            await self._console_ui.start()
+
+            # 加载插件
             plugin_classes = self._discover_plugins()
             if plugin_classes:
                 await self._plugin_manager.load_all(plugin_classes)
@@ -163,41 +171,42 @@ class Bot:
 
             log.info("Bot 启动完成，开始接收事件 ...")
 
+            # 并行运行核心循环
             serve_task = asyncio.create_task(
                 self._plugin_manager.serve(), name="plugin-serve"
             )
+            cat_task = asyncio.create_task(self._cat_loop(), name="ws-cat")
 
             try:
-                while not self._stop_event.is_set() and self._ws.running:
-                    await self._cat()
-                    await asyncio.sleep(0)
+                await asyncio.gather(serve_task, cat_task, return_exceptions=True)
             except asyncio.CancelledError:
                 pass
             finally:
-                print()
-
-            serve_task.cancel()
-            try:
-                await serve_task
-            except asyncio.CancelledError:
-                pass
+                if self._console_ui:
+                    await self._console_ui.stop()
 
         except KeyboardInterrupt:
-            pass
+            log.info("收到中断信号")
         except Exception as e:
             if self.debug:
                 raise
             log.error("Bot 异常: %s", e)
         finally:
-            try:
-                await self._ws.stop()
-            except Exception as exc:
-                log.error("WS 关闭异常: %s", exc)
-            Bot.running = False
-            self._stop_event.set()  # ← 关键：释放 _runner 的 wait()
-            log.info("Bot 已完全停止")
+            # ← 统一走 stop() 完成清理，无论正常退出还是异常
+            await self.stop()
 
     # ==================== 内部运行循环 ====================
+
+    async def _cat_loop(self) -> None:
+        """持续从 WS 读取并发布事件，直到停止信号。"""
+        try:
+            while not self._stop_event.is_set() and self._ws.running:
+                try:
+                    await self._cat()
+                except Exception as exc:
+                    log.debug("Cat loop error: %s", exc)
+        except asyncio.CancelledError:
+            pass  # ← 正常响应取消
 
     async def _cat(self) -> None:
         """从 WS 读取原始消息，以最小开销发布到总线。"""
@@ -237,7 +246,9 @@ class Bot:
         print()
         log.info("Bot 正在退出 ...")
 
+        # ← 关键：先取消 serve() 的阻塞，让 gather 能结束
         if self._plugin_manager is not None:
+            self._plugin_manager.request_shutdown()
             try:
                 await self._plugin_manager.shutdown()
             except Exception as exc:
@@ -249,6 +260,7 @@ class Bot:
             log.error("WS 关闭异常: %s", exc)
 
         Bot.running = False
+        self._stop_event.set()
         log.info("Bot 已完全停止")
 
     # ==================== 工具 ====================

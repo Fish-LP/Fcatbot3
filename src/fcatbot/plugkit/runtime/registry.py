@@ -86,7 +86,7 @@ class PluginServiceRegistry:
         self._services[name] = info
         self._providers.setdefault(provider, set()).add(name)
 
-        logger.info("Service registered: %s@%s by %s", name, version, provider)
+        logger.debug("Service registered: %s@%s by %s", name, version, provider)
         self._emit("register", info)
         return info
 
@@ -119,7 +119,7 @@ class PluginServiceRegistry:
         if not self._providers.get(provider):
             self._providers.pop(provider, None)
 
-        logger.info("Service unregistered: %s by %s", name, provider)
+        logger.debug("Service unregistered: %s by %s", name, provider)
         self._emit("unregister", info)
         return info
 
@@ -142,7 +142,7 @@ class PluginServiceRegistry:
                 removed.append(info)
                 self._emit("unregister", info)
         if removed:
-            logger.info(
+            logger.debug(
                 "Bulk unregistered %d service(s) from %s", len(removed), provider
             )
         return removed
