@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import os
 import re
 import warnings
@@ -21,11 +22,6 @@ from queue import Queue
 from typing import Any, Dict, List, Optional, Union, cast
 
 from fcatbot.utils.color import Color
-
-try:
-    from tqdm import tqdm as tqdm_original  # type: ignore
-except ImportError:
-    tqdm_original = None
 
 __author__ = "Fish-LP <Fish.zh@outlook.com>"
 __version__ = "3.0.0"
@@ -90,51 +86,6 @@ class LogConfig:
             use_json=os.getenv("LOG_JSON_FORMAT", "false").lower() == "true",
             redirect_rules=redirect_rules,
         )
-
-
-# ---------- tqdm 扩展 ----------
-if tqdm_original is not None:
-
-    class tqdm(tqdm_original):
-        _StyleMap = {
-            "BLACK": Color.Black,
-            "RED": Color.Red,
-            "GREEN": Color.Green,
-            "YELLOW": Color.Yellow,
-            "BLUE": Color.Blue,
-            "MAGENTA": Color.Magenta,
-            "CYAN": Color.Cyan,
-            "WHITE": Color.White,
-        }
-
-        def __init__(self, *args, **kwargs):
-            self._custom_colour = kwargs.get("colour", "GREEN")
-            kwargs.setdefault(
-                "bar_format",
-                f"{Color.Cyan}{{desc}}{Color.Reset} "
-                f"{Color.White}{{percentage:3.0f}}%{Color.Reset} "
-                f"{Color.Gray}[{{n_fmt}}]{Color.Reset}"
-                f"{Color.White}|{{bar:20}}|{Color.Reset}"
-                f"{Color.Blue}[{{elapsed}}]{Color.Reset}",
-            )
-            kwargs.setdefault("ncols", 80)
-            kwargs.setdefault("colour", None)
-            super().__init__(*args, **kwargs)
-            self.colour = self._custom_colour
-
-        @property
-        def colour(self):
-            return self._colour
-
-        @colour.setter
-        def colour(self, color):
-            if not color:
-                color = "GREEN"
-            color_upper = color.upper()
-            valid_color = self._StyleMap.get(color_upper, "GREEN")
-            self._colour = color_upper
-            if self.desc:
-                self.desc = f"{getattr(Color, valid_color)}{self.desc}{Color.Reset}"
 
 
 # ---------- 格式化器与过滤器 ----------
@@ -203,6 +154,35 @@ class DynamicFormatter(logging.Formatter):
 
 
 class JsonFormatter(logging.Formatter):
+    # 标准 LogRecord 属性集合，用于区分用户自定义字段
+    _StdRecordKeys = frozenset(
+        {
+            "name",
+            "msg",
+            "args",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "created",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "processName",
+            "process",
+            "message",
+            "asctime",
+            "taskName",
+        }
+    )
+
     def __init__(
         self,
         fmt_dict: Optional[Dict[str, str]] = None,
@@ -231,8 +211,16 @@ class JsonFormatter(logging.Formatter):
             value = getattr(record, key, None)
             if value:
                 log_obj[key] = value
-        if hasattr(record, "extra"):
-            log_obj.update(record.extra)  # type: ignore
+
+        # 正确收集用户通过 extra= 传入的自定义字段
+        for key, value in record.__dict__.items():
+            if (
+                key not in self._StdRecordKeys
+                and key not in self.extra_fields
+                and value is not None
+            ):
+                log_obj[key] = value
+
         return json.dumps(log_obj, ensure_ascii=False, default=str)
 
 
@@ -292,7 +280,12 @@ def _make_formats(use_color: bool) -> Dict[str, Dict[str, str]]:
 
 
 # ---------- 核心安装函数 ----------
+_listener: Optional[QueueListener] = None
+
+
 def setup_logging(config: Optional[LogConfig] = None) -> Optional[QueueListener]:
+    global _listener
+
     if config is None:
         config = LogConfig.from_env()
 
@@ -301,6 +294,16 @@ def setup_logging(config: Optional[LogConfig] = None) -> Optional[QueueListener]
 
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
+
+    # 停止旧的 QueueListener，防止文件句柄泄漏和重复写入
+    if _listener is not None:
+        _listener.stop()
+        _listener = None
+
+    # 清理残留的 QueueHandler（可能来自上一次 queue 模式配置）
+    for h in root.handlers[:]:
+        if isinstance(h, logging.handlers.QueueHandler):
+            root.removeHandler(h)
 
     console_fmt = DynamicFormatter(
         fmt_dict=formats["console"],
@@ -363,6 +366,7 @@ def setup_logging(config: Optional[LogConfig] = None) -> Optional[QueueListener]
 
         log_queue: Queue = Queue(maxsize=config.queue_size)
         queue_handler = QueueHandler(log_queue)
+        queue_handler.addFilter(ContextFilter())
 
         # 精确区分：FileHandler（文件日志）走后台线程，
         # StreamHandler（控制台）留在 root 同步输出，供 patch_stdout 捕获
@@ -376,13 +380,18 @@ def setup_logging(config: Optional[LogConfig] = None) -> Optional[QueueListener]
             h for h in root.handlers if isinstance(h, logging.FileHandler)
         ]
 
-        root.handlers.clear()
+        # 精确移除目标 handler，保留外部注入的 handler（如 PromptToolkitConsole 的 _pt_handler）
+        for h in console_handlers + file_handlers:
+            if h in root.handlers:
+                root.removeHandler(h)
+
         for h in console_handlers:
-            root.handlers.append(h)
-        root.handlers.append(queue_handler)
+            root.addHandler(h)
+        root.addHandler(queue_handler)
 
         listener = QueueListener(log_queue, *file_handlers, respect_handler_level=True)
         listener.start()
+        _listener = listener
         return listener
 
     return None

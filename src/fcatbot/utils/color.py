@@ -13,7 +13,7 @@ import ctypes
 import sys
 from ctypes import wintypes
 from functools import lru_cache
-from typing import Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 
 def _is_ansi_supported() -> bool:
@@ -73,7 +73,7 @@ class _AnsiCode:
 
 
 class _ColorMeta(type):
-    def __new__(mcs, name: str, bases: Tuple[type, ...], namespace: Dict[str, any]):
+    def __new__(mcs, name: str, bases: Tuple[type, ...], namespace: Dict[str, Any]):
         cls = super().__new__(mcs, name, bases, namespace)
         if not hasattr(cls, "_ColorEnabled"):
             cls._ColorEnabled = _is_ansi_supported()

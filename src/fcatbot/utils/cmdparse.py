@@ -3,50 +3,185 @@ from __future__ import annotations
 import inspect
 import re
 from dataclasses import dataclass, field
-from enum import Enum, auto
-from typing import Any, Callable, Dict, List, Optional, Tuple, get_type_hints
+from typing import Any, Callable, Dict, List, Optional
 
-# ==================== 运行时模型层 ====================
+# ==================== 装饰器层 ====================
 
 
-class Arity(Enum):
-    Flag = auto()
-    Required = auto()
-    ZeroOrMore = auto()
-    OneOrMore = auto()
+class GroupBuilder:
+    """Group 装饰器构建器，用于创建命令分组。
+
+    通过该类可以将多个相关命令组织到一个分组下，形成层级命令结构。
+    被装饰的函数将成为该分组的根节点，其下的子命令通过 `.command()` 注册。
+
+    Args:
+        name: 分组名称，若未指定则使用被装饰函数的函数名。
+        description: 分组描述信息。
+    """
+
+    def __init__(self, name: Optional[str] = None, *, description: str = ""):
+        self.name = name
+        self.description = description
+
+    def __call__(
+        self,
+        func: Optional[Callable[..., Any]] = None,
+        *,
+        description: str = "",
+    ) -> Any:
+        """使实例可被直接调用作为装饰器。
+
+        支持无参数装饰器用法 `@group` 或有参数用法 `@group(...)`。
+
+        Args:
+            func: 被装饰的函数，若为 None 则返回一个真正的装饰器函数。
+            description: 针对该具体命令节点的描述，优先级高于构造时的 description。
+
+        Return:
+            被标记后的原函数，或一个待应用的装饰器函数。
+        """
+        desc = description or self.description
+        if func is not None:
+            return self._mark(func, desc)
+
+        def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
+            return self._mark(f, desc)
+
+        return decorator
+
+    def _mark(self, func: Callable[..., Any], description: str) -> Callable[..., Any]:
+        """在函数上标记分组根节点的元数据。
+
+        Args:
+            func: 目标函数。
+            description: 描述文本。
+
+        Return:
+            被标记后的原函数。
+        """
+        func.__command_group_name__ = self.name or func.__name__
+        func.__command_group_description__ = self.description
+        func.__command_description__ = description
+        func.__command_is_group_root__ = True
+        return func
+
+    def command(
+        self, name: Optional[str] = None, *, description: str = ""
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """返回一个装饰器，用于将函数注册为当前分组下的子命令。
+
+        Args:
+            name: 子命令名称。若为 None，则自动从函数名推导（去除 _cmd_ 或 _ 前缀）。
+            description: 子命令描述。
+
+        Return:
+            一个装饰器函数，接收原函数并返回标记后的函数。
+        """
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            node_name = name
+            if node_name is None:
+                node_name = func.__name__
+                if node_name.startswith("_cmd_"):
+                    node_name = node_name[5:]
+                if node_name.startswith("_"):
+                    node_name = node_name[1:]
+            func.__command_name__ = node_name
+            func.__command_description__ = description
+            func.__command_group__ = self.name
+            return func
+
+        return decorator
+
+
+class _OnCommand:
+    """单命令装饰器入口，提供命令注册与分组构建能力。
+
+    通过 `on_command` 单例使用：
+    - `@on_command()` 注册单个命令。
+    - `@on_command.group()` 创建命令分组。
+    """
+
+    def __call__(
+        self, name: Optional[str] = None, *, description: str = ""
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """注册单个命令的装饰器。
+
+        Args:
+            name: 命令名称。若为 None，则自动从函数名推导（去除 _cmd_ 或 _ 前缀）。
+            description: 命令描述。
+
+        Return:
+            一个装饰器函数，用于标记目标函数。
+        """
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            node_name = name
+            if node_name is None:
+                node_name = func.__name__
+                if node_name.startswith("_cmd_"):
+                    node_name = node_name[5:]
+                elif node_name.startswith("_"):
+                    node_name = node_name[1:]
+            func.__command_name__ = node_name
+            func.__command_description__ = description
+            return func
+
+        return decorator
+
+    def group(
+        self, name: Optional[str] = None, *, description: str = ""
+    ) -> GroupBuilder:
+        """创建一个命令分组构建器。
+
+        Args:
+            name: 分组名称。
+            description: 分组描述。
+
+        Return:
+            GroupBuilder 实例，可用于进一步注册子命令。
+        """
+        return GroupBuilder(name=name, description=description)
+
+
+on_command = _OnCommand()
+
+
+# ==================== 上下文模型层 ====================
 
 
 @dataclass
-class Argument:
-    Name: str
-    Aliases: Tuple[str, ...] = ()
-    Arity: Arity = Arity.Required
-    Type: Callable[[str], Any] = str
-    Default: Any = None
-    Help: str = ""
-    Required: bool = False
+class CommandContext:
+    """命令执行上下文，封装一次命令调用所需的原始信息。
 
-    @property
-    def DisplayNames(self) -> str:
-        return ", ".join(self.Aliases) if self.Aliases else self.Name
+    Args:
+        RawText: 原始命令行文本。
+        RawTokens: 经词法分析后的令牌列表。
+        Source: 命令来源标识，例如 "console"、"qq" 等。
+        metadata: 额外元数据字典，供扩展使用。
+    """
 
-    @property
-    def PrimaryAlias(self) -> str:
-        """返回主别名（最长的那个，通常是 --long-form）"""
-        if not self.Aliases:
-            return self.Name
-        return max(self.Aliases, key=len)
+    RawText: str
+    RawTokens: List[str]
+    Source: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class ParseResult:
-    CommandPath: List[str] = field(default_factory=list)
-    PositionalArgs: List[Any] = field(default_factory=list)
-    NamedArgs: Dict[str, Any] = field(default_factory=dict)
-    Flags: Dict[str, bool] = field(default_factory=dict)
+# ==================== 运行时模型 ====================
 
 
 class CommandNode:
+    """命令树节点，代表一个命令或命令分组。
+
+    通过 Subcommands 字典维护子命令关系，形成树形命令结构。
+
+    Args:
+        Name: 节点名称。
+        Description: 节点描述。
+        Handler: 命令处理函数，若为 None 则表示该节点为中间分组节点。
+        Doc: 处理函数的文档字符串，用于帮助信息展示。
+    """
+
     def __init__(
         self,
         Name: str,
@@ -55,29 +190,46 @@ class CommandNode:
         Handler: Optional[Callable[..., Any]] = None,
         Doc: str = "",
     ):
+        """初始化命令节点。
+
+        Args:
+            Name: 节点名称。
+            Description: 节点描述。
+            Handler: 命令处理函数。
+            Doc: 文档字符串。
+        """
         self.Name = Name
-        self.Description = Description  # 单行摘要，用于列表/概览，用户显式设置
+        self.Description = Description
         self.Handler = Handler
-        self.Doc = Doc  # 完整文档字符串，描述命令用途
-        self.Arguments: Dict[str, Argument] = {}
-        self.Positional: List[Argument] = []
+        self.Doc = Doc
         self.Subcommands: Dict[str, CommandNode] = {}
         self.Parent: Optional[CommandNode] = None
 
-    def AddArgument(self, arg: Argument) -> CommandNode:
-        self.Arguments[arg.Name] = arg
-        return self
-
-    def AddPositional(self, arg: Argument) -> CommandNode:
-        self.Positional.append(arg)
-        return self
-
     def AddSubcommand(self, node: CommandNode) -> CommandNode:
+        """添加子命令节点，并自动建立父子关系。
+
+        同时会为节点名称中的连字符 "-" 生成下划线 "_" 的别名，
+        以支持两种风格的命令输入。
+
+        Args:
+            node: 待添加的子命令节点。
+
+        Return:
+            当前节点自身，支持链式调用。
+        """
         node.Parent = self
         self.Subcommands[node.Name] = node
+        alt = node.Name.replace("-", "_")
+        if alt != node.Name:
+            self.Subcommands[alt] = node
         return self
 
     def GetCommandPath(self) -> List[str]:
+        """获取从根节点到当前节点的完整路径。
+
+        Return:
+            由各级节点名称组成的列表，从根到当前节点顺序排列。
+        """
         path, cur = [], self
         while cur:
             path.append(cur.Name)
@@ -85,16 +237,34 @@ class CommandNode:
         return list(reversed(path))
 
 
-# ==================== 词法/语法层 ====================
+# ==================== 词法层 ====================
 
 
 class CommandLexer:
+    """命令词法分析器，负责将原始命令行文本拆分为令牌列表。
+
+    支持双引号、单引号包裹的字符串，以及反斜杠转义。
+    """
+
     TokenPattern = re.compile(
         r'(?:[^\s"\'\\]+|\\.)+' r'|"(?:[^"\\]|\\.)*"' r"|'(?:[^'\\]|\\.)*'", re.VERBOSE
     )
 
     @classmethod
     def Split(cls, text: str) -> List[str]:
+        """将输入文本拆分为令牌列表。
+
+        处理规则：
+        - 按空白字符分割。
+        - 支持 "..." 和 \'...\' 包裹的字符串（去除引号）。
+        - 支持 \\\\, \\\", \\\' 的转义序列还原。
+
+        Args:
+            text: 原始命令行文本。
+
+        Return:
+            清洗后的令牌字符串列表。
+        """
         tokens = cls.TokenPattern.findall(text)
         cleaned = []
         for tok in tokens:
@@ -108,444 +278,467 @@ class CommandLexer:
 
 
 class ParseError(Exception):
+    """命令解析或执行过程中出现的错误。"""
+
     pass
-
-
-class _HelpRequest(Exception):
-    def __init__(self, node: CommandNode):
-        self.Node = node
-
-
-class CommandParser:
-    def __init__(self, root: CommandNode):
-        self.Root = root
-
-    def Parse(self, tokens: List[str]) -> Tuple[CommandNode, ParseResult]:
-        if not tokens:
-            raise ParseError("Empty command")
-
-        current, result, idx = self.Root, ParseResult(), 0
-
-        while idx < len(tokens) and tokens[idx] in current.Subcommands:
-            current = current.Subcommands[tokens[idx]]
-            result.CommandPath.append(tokens[idx])
-            idx += 1
-
-        consumed_positional = 0
-        while idx < len(tokens):
-            token = tokens[idx]
-
-            if token in ("--help", "-h"):
-                raise _HelpRequest(current)
-
-            if token.startswith("--") and "=" in token:
-                key, _, val = token.partition("=")
-                idx = self._ConsumeNamed(current, result, tokens, key, val, idx)
-                idx += 1
-                continue
-
-            if token.startswith("--"):
-                idx = self._ConsumeNamed(current, result, tokens, token, None, idx)
-                idx += 1
-                continue
-
-            if token.startswith("-") and len(token) > 2 and not token.startswith("--"):
-                tokens = tokens[:idx] + [f"-{c}" for c in token[1:]] + tokens[idx + 1 :]
-                continue
-
-            if token.startswith("-") and len(token) == 2:
-                idx = self._ConsumeNamed(current, result, tokens, token, None, idx)
-                idx += 1
-                continue
-
-            if consumed_positional < len(current.Positional):
-                arg_def = current.Positional[consumed_positional]
-                result.PositionalArgs.append(self._Convert(arg_def, token))
-                consumed_positional += 1
-                idx += 1
-            else:
-                raise ParseError(f"Unexpected positional argument: {token}")
-
-        self._Validate(current, result)
-        return current, result
-
-    def _ConsumeNamed(self, node, result, tokens, key, inline, idx):
-        arg_def = None
-        for a in node.Arguments.values():
-            if key == a.Name or key in a.Aliases:
-                arg_def = a
-                break
-        if not arg_def:
-            raise ParseError(f"Unknown argument: {key}")
-
-        if arg_def.Arity == Arity.Flag:
-            result.Flags[arg_def.Name] = True
-            return idx
-
-        if inline is not None:
-            val = inline
-        else:
-            if idx + 1 < len(tokens):
-                nxt = tokens[idx + 1]
-                is_opt = nxt.startswith("-") and any(
-                    nxt == x.Name or nxt in x.Aliases for x in node.Arguments.values()
-                )
-                if not is_opt:
-                    val = nxt
-                    idx += 1
-                else:
-                    raise ParseError(f"Argument {key} requires a value")
-            else:
-                raise ParseError(f"Argument {key} requires a value")
-
-        converted = self._Convert(arg_def, val)
-        if arg_def.Arity in (Arity.ZeroOrMore, Arity.OneOrMore):
-            result.NamedArgs.setdefault(arg_def.Name, []).append(converted)
-        else:
-            result.NamedArgs[arg_def.Name] = converted
-        return idx
-
-    def _Convert(self, arg_def, raw):
-        try:
-            return arg_def.Type(raw)
-        except Exception as e:
-            raise ParseError(f"Invalid value '{raw}' for {arg_def.Name}: {e}")
-
-    def _Validate(self, node, result):
-        for name, arg in node.Arguments.items():
-            if (
-                arg.Required
-                and name not in result.NamedArgs
-                and name not in result.Flags
-            ):
-                raise ParseError(f"Missing required argument: {arg.DisplayNames}")
 
 
 # ==================== 统一入口：CommandApp ====================
 
 
-def _bool_type(s: str) -> bool:
-    return s.lower() in ("true", "1", "yes", "on", "y")
-
-
 class CommandApp:
+    """命令应用主入口，负责命令注册、路由分发与执行。
+
+    支持层级命令结构，自动注入 CommandContext 与 raw 文本参数，
+    并可根据处理函数签名推导帮助信息。
+
+    Args:
+        Name: 应用根节点名称。
+        Description: 应用描述。
+        parent: 父应用实例，用于子应用场景；根应用应为 None。
+        colorize: 是否启用 ANSI 颜色输出。
+    """
+
     def __init__(
         self,
         *,
         Name: str = "root",
         Description: str = "",
         parent: Optional[CommandApp] = None,
+        colorize: bool = False,
     ):
+        """初始化命令应用。
+
+        Args:
+            Name: 根节点名称。
+            Description: 应用描述。
+            parent: 父应用引用。
+            colorize: 是否启用彩色输出。
+        """
         self._node = CommandNode(Name=Name, Description=Description)
         self._parent = parent
-        self._parser: Optional[CommandParser] = None
+        self._colorize = colorize
+        self._c = (
+            {
+                "reset": "\x1b[0m",
+                "bold": "\x1b[1m",
+                "cyan": "\x1b[36m",
+                "yellow": "\x1b[33m",
+                "green": "\x1b[32m",
+                "gray": "\x1b[90m",
+                "red": "\x1b[31m",
+            }
+            if colorize
+            else {
+                k: ""
+                for k in ("reset", "bold", "cyan", "yellow", "green", "gray", "red")
+            }
+        )
 
-    def command(self, name: Optional[str] = None, description: Optional[str] = None):
-        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            node = self._build_node(func, name, description)
+    def register(
+        self, func: Callable[..., Any], command_name: str | None = None
+    ) -> None:
+        """注册单个函数为命令或命令分组根节点。
+
+        自动识别 `@on_command.group()` 标记的分组根节点，或普通命令节点。
+
+        Args:
+            func: 被装饰的处理函数。
+            command_name: 强制指定的命令名称，若为 None 则读取函数上的元数据。
+        """
+        underlying = getattr(func, "__func__", func)
+
+        if getattr(underlying, "__command_is_group_root__", False):
+            group_name = getattr(underlying, "__command_group_name__")
+            group_desc = getattr(underlying, "__command_group_description__", "")
+            cmd_desc = getattr(underlying, "__command_description__", group_desc)
+
+            node = CommandNode(
+                Name=group_name,
+                Description=cmd_desc,
+                Handler=func,
+                Doc=inspect.getdoc(underlying) or "",
+            )
             self._node.AddSubcommand(node)
-            return func
+            return
 
-        return decorator
+        cmd_name = command_name or getattr(underlying, "__command_name__", None)
+        if cmd_name is None:
+            raise ValueError(f"{func!r} 未被 @on_command 或 GroupBuilder 装饰")
 
-    def group(self, name: str, description: str = "") -> CommandApp:
-        sub = CommandApp(Name=name, Description=description, parent=self)
-        self._node.AddSubcommand(sub._node)
-        return sub
+        cmd_desc = getattr(underlying, "__command_description__", "")
 
-    async def run(self, command_line: str) -> Any:
+        node = CommandNode(
+            Name=cmd_name,
+            Description=cmd_desc,
+            Handler=func,
+            Doc=inspect.getdoc(underlying) or "",
+        )
+        self._node.AddSubcommand(node)
+
+    @property
+    def node(self) -> CommandNode:
+        """获取根命令节点。
+
+        Return:
+            根 CommandNode 实例。
+        """
+        return self._node
+
+    def register_instance(self, instance: Any) -> None:
+        """扫描实例上的所有方法，自动注册为命令或命令分组。
+
+        注册规则：
+        - 带有 `__command_name__` 或 `__command_is_group_root__` 标记的方法。
+        - 名称以 `_cmd_` 开头的方法。
+        - 分组根节点优先注册，随后将其子命令挂载到对应分组下。
+
+        Args:
+            instance: 包含命令方法的类实例。
+        """
+        candidates: List[tuple[str, Callable[..., Any]]] = []
+        for attr_name in dir(instance):
+            if attr_name.startswith("__"):
+                continue
+            try:
+                member = inspect.getattr_static(instance, attr_name)
+            except AttributeError:
+                continue
+            if not inspect.isfunction(member):
+                continue
+
+            is_marked = hasattr(member, "__command_name__") or hasattr(
+                member, "__command_is_group_root__"
+            )
+            is_prefixed = attr_name.startswith("_cmd_")
+
+            if is_marked or is_prefixed:
+                bound = member.__get__(instance, instance.__class__)
+                candidates.append((attr_name, bound))
+
+        groups: Dict[str, CommandNode] = {}
+        for attr_name, bound in candidates:
+            underlying = getattr(bound, "__func__", bound)
+            if not getattr(underlying, "__command_is_group_root__", False):
+                continue
+
+            group_name = getattr(underlying, "__command_group_name__")
+            group_desc = getattr(underlying, "__command_group_description__", "")
+            cmd_desc = getattr(underlying, "__command_description__", group_desc)
+
+            node = CommandNode(
+                Name=group_name,
+                Description=cmd_desc,
+                Handler=bound,
+                Doc=inspect.getdoc(underlying) or "",
+            )
+            self._node.AddSubcommand(node)
+            groups[group_name] = node
+
+        for attr_name, bound in candidates:
+            underlying = getattr(bound, "__func__", bound)
+            if getattr(underlying, "__command_is_group_root__", False):
+                continue
+
+            cmd_name = getattr(underlying, "__command_name__", None)
+            if cmd_name is None and attr_name.startswith("_cmd_"):
+                cmd_name = attr_name[5:]
+            if cmd_name is None:
+                cmd_name = attr_name
+
+            cmd_desc = getattr(underlying, "__command_description__", "")
+            if not cmd_desc:
+                doc = inspect.getdoc(underlying)
+                if doc:
+                    cmd_desc = doc.strip().splitlines()[0]
+
+            group_name = getattr(underlying, "__command_group__", None)
+
+            node = CommandNode(
+                Name=cmd_name,
+                Description=cmd_desc,
+                Handler=bound,
+                Doc=inspect.getdoc(underlying) or "",
+            )
+
+            if group_name and group_name in groups:
+                groups[group_name].AddSubcommand(node)
+            else:
+                self._node.AddSubcommand(node)
+
+    async def execute(self, ctx: CommandContext) -> Any:
+        """执行一次命令调用。
+
+        路由逻辑：
+        1. 若令牌为空，抛出 ParseError。
+        2. 若输入为 help / --help / -h，返回当前节点的帮助信息。
+        3. 按令牌逐层匹配子命令树。
+        4. 若剩余令牌以 help 开头，返回匹配到的节点的帮助信息。
+        5. 若匹配到的节点无处理函数，返回帮助信息。
+        6. 根据处理函数签名注入参数（ctx、raw、其余默认值参数），并调用处理函数。
+
+        Args:
+            ctx: 命令执行上下文。
+
+        Return:
+            处理函数的返回值。
+
+        Raises:
+            RuntimeError: 若当前实例不是根应用时调用。
+            ParseError: 命令为空、参数缺少默认值，或其他解析错误。
+        """
         if self._parent is not None:
-            raise RuntimeError("Only root CommandApp can run.")
+            raise RuntimeError("Only root CommandApp can execute.")
 
-        if self._parser is None:
-            self._parser = CommandParser(self._node)
-
-        tokens = CommandLexer.Split(command_line)
+        tokens = ctx.RawTokens
         if not tokens:
             raise ParseError("Empty command")
 
-        try:
-            node, result = self._parser.Parse(tokens)
-        except _HelpRequest as e:
-            return self._format_help(e.Node)
+        # if tokens[0] in ("help", "--help", "-h") and len(tokens) == 1:
+        #     return self._format_help(self._node)
+
+        node = self._node
+        idx = 0
+        while idx < len(tokens) and tokens[idx] in node.Subcommands:
+            node = node.Subcommands[tokens[idx]]
+            idx += 1
+
+        remaining = tokens[idx:]
+        raw_text = " ".join(remaining)
+
+        if remaining and remaining[0] in ("--help", "-h", "help"):
+            return self._format_help(node)
 
         if node.Handler is None:
-            raise ParseError(
-                f"Command '{' '.join(node.GetCommandPath())}' requires a subcommand."
-            )
+            return self._format_help(node)
 
-        bound = self._bind(node.Handler, result)
+        sig = inspect.signature(node.Handler)
+        params = list(sig.parameters.items())
+        kwargs: Dict[str, Any] = {}
+
+        if len(params) > 0:
+            name0, _ = params[0]
+            kwargs[name0] = ctx
+            params = params[1:]
+
+        if len(params) > 0:
+            name1, _ = params[0]
+            kwargs[name1] = raw_text
+            params = params[1:]
+
+        for name, param in params:
+            if param.default is inspect.Parameter.empty:
+                raise ParseError(
+                    f"Command '{node.Name}' parameter '{name}' has no default value. "
+                    f"Only the first two parameters (ctx, raw) are injected by the framework."
+                )
+            kwargs[name] = param.default
+
+        bound = sig.bind(**kwargs)
+        bound.apply_defaults()
 
         if self._is_async(node.Handler):
             return await node.Handler(*bound.args, **bound.kwargs)
         return node.Handler(*bound.args, **bound.kwargs)
 
-    # ----- 内部实现 -----
+    async def run(self, command_line: str, source: str) -> Any:
+        """便捷方法：从原始命令行字符串直接构建上下文并执行。
 
-    def _build_node(self, func, name, description) -> CommandNode:
-        node_name = name or func.__name__.lower().replace("_", "-")
-        full_doc = inspect.getdoc(func) or ""
-        # Description 仅来自装饰器参数；用户不传则留空，框架不主动注入
-        desc = description or ""
+        Args:
+            command_line: 原始命令行文本。
+            source: 命令来源标识。
 
-        node = CommandNode(Name=node_name, Description=desc, Handler=func, Doc=full_doc)
-
-        sig = inspect.signature(func)
-        hints = get_type_hints(func)
-        is_method = inspect.ismethod(func)
-
-        for i, (pname, param) in enumerate(sig.parameters.items()):
-            if is_method and i == 0:
-                continue
-
-            hint = hints.get(pname, str)
-            has_default = param.default is not inspect.Parameter.empty
-            default = param.default if has_default else None
-            required = not has_default
-
-            # 1) 位置参数
-            if (
-                param.kind
-                in (
-                    inspect.Parameter.POSITIONAL_ONLY,
-                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                )
-                and required
-            ):
-                node.AddPositional(
-                    Argument(
-                        Name=pname,
-                        Type=hint if hint is not inspect.Parameter.empty else str,
-                        Required=True,
-                    )
-                )
-                continue
-
-            # 2) Flag
-            if hint is bool and has_default and default is False:
-                node.AddArgument(
-                    Argument(
-                        Name=pname,
-                        Aliases=(f"--{pname.replace('_', '-')}",),
-                        Arity=Arity.Flag,
-                    )
-                )
-                continue
-
-            # 3) 选项
-            if param.kind in (
-                inspect.Parameter.KEYWORD_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            ):
-                long_name = f"--{pname.replace('_', '-')}"
-                aliases: List[str] = [long_name]
-                if len(pname) > 1:
-                    aliases.insert(0, f"-{pname[0]}")
-
-                converter = (
-                    _bool_type
-                    if hint is bool
-                    else (hint if hint is not inspect.Parameter.empty else str)
-                )
-
-                node.AddArgument(
-                    Argument(
-                        Name=pname,
-                        Aliases=tuple(aliases),
-                        Type=converter,
-                        Default=default,
-                        Required=required,
-                    )
-                )
-
-        return node
-
-    def _bind(self, handler, result: ParseResult):
-        sig = inspect.signature(handler)
-        bound_args: Dict[str, Any] = {}
-        pos_queue = list(result.PositionalArgs)
-
-        for name, param in sig.parameters.items():
-            if name in result.NamedArgs:
-                bound_args[name] = result.NamedArgs[name]
-                continue
-            if name in result.Flags:
-                bound_args[name] = result.Flags[name]
-                continue
-
-            if param.kind in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            ):
-                if pos_queue:
-                    bound_args[name] = pos_queue.pop(0)
-                    continue
-
-            if param.default is not inspect.Parameter.empty:
-                continue
-
-            if param.kind == inspect.Parameter.VAR_POSITIONAL:
-                bound_args[name] = tuple(pos_queue)
-                pos_queue.clear()
-                continue
-
-            if param.kind == inspect.Parameter.VAR_KEYWORD:
-                extra = {
-                    k: v
-                    for k, v in {**result.NamedArgs, **result.Flags}.items()
-                    if k not in sig.parameters
-                }
-                bound_args[name] = extra
-                continue
-
-        try:
-            b = sig.bind(**bound_args)
-            b.apply_defaults()
-            return b
-        except TypeError as e:
-            raise ParseError(f"Argument binding failed: {e}")
+        Return:
+            命令处理函数的返回值。
+        """
+        tokens = CommandLexer.Split(command_line)
+        ctx = CommandContext(
+            RawText=command_line,
+            RawTokens=tokens,
+            Source=source,
+        )
+        return await self.execute(ctx)
 
     @staticmethod
     def _is_async(handler: Callable[..., Any]) -> bool:
+        """判断处理函数是否为异步函数（协程）。
+
+        Args:
+            handler: 待检测的函数。
+
+        Return:
+            若为协程函数则返回 True，否则返回 False。
+        """
         if inspect.iscoroutinefunction(handler):
             return True
         if hasattr(handler, "__func__"):
-            return inspect.iscoroutinefunction(handler.__func__)
+            return inspect.iscoroutinefunction(handler.__func__)  # type: ignore
         return False
 
+    # ==================== Help 格式化（Mirai 风格）====================
+
     def _format_help(self, node: CommandNode) -> str:
-        """
-        生成 Debian 风格的紧凑帮助文本。
+        """格式化指定节点的帮助信息，输出 Mirai 风格的文本。
 
-        格式：
-            Usage: <path> <args_signature>
+        包含 Usage、描述、文档字符串及子命令列表。
 
-            <单行 Description>
+        Args:
+            node: 目标命令节点。
 
-            Arguments:
-              <name>           <help>
-
-            Options:
-              <aliases>        <help> (default: <val>)
-
-            Commands:
-              <name>           <单行 Description>
+        Return:
+            格式化后的帮助文本字符串。
         """
         lines: List[str] = []
+        C = self._c
 
-        # ---- Usage 行（自动生成参数签名）----
-        parts = ["Usage:", " ".join(node.GetCommandPath())]
+        # Usage
+        path = node.GetCommandPath()
+        display_path = path[1:] if len(path) > 1 else []
+        cmd_path = " ".join(display_path)
 
-        # 位置参数占位符
-        for p in node.Positional:
-            parts.append(f"<{p.Name}>")
+        if node.Handler:
+            usage = self._format_usage(node)
+        else:
+            usage = f"{cmd_path} <command>" if cmd_path else "<command>"
 
-        # 如果有选项，统一显示 [options] 或逐个显示
-        if node.Arguments:
-            # 逐个显示更精确
-            for a in node.Arguments.values():
-                if a.Arity == Arity.Flag:
-                    parts.append(f"[{a.PrimaryAlias}]")
-                elif a.Required:
-                    parts.append(f"{a.PrimaryAlias} <{a.Name}>")
-                else:
-                    parts.append(f"[{a.PrimaryAlias} <{a.Name}>]")
+        lines.append(
+            f"{C['bold']}{C['cyan']}Usage:{C['reset']} "
+            f"{C['bold']}{usage}{C['reset']}"
+        )
 
-        lines.append(" ".join(parts))
+        doc = (node.Doc or "").strip()
+        if doc and doc != (node.Description or "").strip():
+            lines.append(f"\n{C['gray']}{node.Name}{C['reset']}")
+            lines.append(f"\n{doc}")
 
-        # ---- 单行 Description（用户显式传入）----
-        if node.Description:
+        elif node.Description:
             lines.append(f"\n{node.Description.strip()}")
 
-        # ---- Arguments ----
-        if node.Positional:
-            lines.append("\nArguments:")
-            for a in node.Positional:
-                req = " (required)"
-                lines.append(f"  {a.Name:<18} {req}")
-
-        # ---- Options ----
-        if node.Arguments:
-            lines.append("\nOptions:")
-            for a in node.Arguments.values():
-                meta = ""
-                if a.Arity != Arity.Flag:
-                    if a.Required:
-                        meta = " (required)"
-                    elif a.Default is not None:
-                        meta = f" (default: {a.Default})"
-                lines.append(f"  {a.DisplayNames:<18}{meta}")
-
-        # ---- Subcommands ----
         if node.Subcommands:
-            lines.append("\nCommands:")
+            lines.append(f"\n{C['bold']}{C['yellow']}Commands:{C['reset']}")
+            seen = set()
             for name, sub in node.Subcommands.items():
-                # 只显示单行 Description
+                if sub in seen:
+                    continue
+                seen.add(sub)
                 desc = sub.Description.strip() if sub.Description else ""
-                lines.append(f"  {name:<18} {desc}")
+
+                usage_hint = self._format_usage(sub, brief=True)
+                if usage_hint:
+                    cmd_line = f"{name} {usage_hint}"
+                else:
+                    cmd_line = name
+
+                lines.append(
+                    f"  {C['bold']}{C['green']}{cmd_line:<30}{C['reset']} {desc}"
+                )
 
         return "\n".join(lines)
 
+    def _format_usage(self, node: CommandNode, brief: bool = False) -> str:
+        """根据 Handler 签名推导 Mirai 风格用法字符串。
 
-# ==================== 使用示例 ====================
+        框架注入约定：
+        - 第1参数：CommandContext（不显示）
+        - 第2参数：raw 字符串（显示为 [raw]）
+        - 其余参数：必须有默认值（显示为 [name=default]）
 
+        Args:
+            node: 目标命令节点。
+            brief: 若为 True，仅返回参数部分，不包含命令路径前缀。
 
-async def main():
-    app = CommandApp(Name="kubectl", Description="Kubernetes CLI")
-
-    @app.command(description="部署容器镜像")
-    async def deploy(
-        image: str,
-        *,
-        replicas: int = 1,
-        namespace: str = "default",
-        dry_run: bool = False,
-    ):
+        Return:
+            用法字符串。
         """
-        部署容器镜像到集群。
+        if not node.Handler:
+            if brief:
+                return "<command>"
+            path = " ".join(node.GetCommandPath()[1:])
+            return f"{path} <command>" if path else "<command>"
 
-        根据指定镜像创建或更新 Deployment。支持指定副本数、命名空间
-        以及预览模式。
-        """
-        mode = "[DRY-RUN] " if dry_run else ""
-        return f"{mode}Deploying {image} x{replicas} to '{namespace}'"
+        path = " ".join(node.GetCommandPath()[1:])
+        sig = inspect.signature(node.Handler)
+        params = list(sig.parameters.items())
 
-    @app.command(description="查看集群状态")
-    def status():
-        """查看当前集群各组件运行状态"""
-        return "All systems operational"
+        # 跳过 self/cls
+        idx = 0
+        if params and params[0][0] in ("self", "cls"):
+            idx += 1
 
-    cfg = app.group("config", description="配置管理")
+        # 跳过 ctx（框架注入，不显示）
+        if len(params) > idx:
+            idx += 1
 
-    @cfg.command(description="读取配置项")
-    def get(key: str):
-        """读取指定配置键的值"""
-        return f"Config {key} = <value>"
+        parts: List[str] = []
 
-    @cfg.command(description="设置配置项")
-    def set(key: str, value: str):
-        """设置指定配置键的值"""
-        return f"Config {key} set to {value}"
+        # raw 参数（第2个注入参数）
+        if len(params) > idx:
+            raw_name, raw_param = params[idx]
+            if raw_param.default is inspect.Parameter.empty:
+                parts.append(f"<{raw_name}>")
+            else:
+                parts.append(f"[{raw_name}]")
+            idx += 1
 
-    # 测试
-    tests = [
-        ("deploy nginx:latest --replicas 3", "正常执行"),
-        ("deploy --help", "帮助：紧凑格式，单行描述"),
-        ("deploy", "缺少参数 → 抛 ParseError"),
-        ("--help", "根命令帮助：展示子命令列表及 Description"),
-    ]
+        # 其余参数：框架要求必须有默认值，显示为 [name=default]
+        for i in range(idx, len(params)):
+            name, param = params[i]
+            if param.default is not inspect.Parameter.empty:
+                default = param.default
+                if isinstance(default, str) and default:
+                    parts.append(f'[{name}="{default}"]')
+                elif default is None or default == "":
+                    parts.append(f"[{name}]")
+                else:
+                    parts.append(f"[{name}={default}]")
+            else:
+                parts.append(f"<{name}>")
 
-    for cmd, note in tests:
-        print(f"$ {cmd}  # {note}")
+        if brief:
+            return " ".join(parts)
+
+        full = ([path] if path else []) + parts
+        return " ".join(full) if full else (path or "")
+
+
+# ==================== 适配器层 ====================
+
+
+async def console_adapter(app: CommandApp):
+    """控制台适配器，提供交互式命令行界面。
+
+    持续读取用户输入，通过 app.execute 执行命令，并输出结果。
+    支持 `help` 查看帮助，`exit` / `quit` 退出，以及 `/` 前缀的命令。
+
+    Args:
+        app: 已注册好命令的 CommandApp 根实例。
+    """
+    print(f"Welcome to {app._node.Name}! Type 'help' or 'exit'.")
+    while True:
         try:
-            result = await app.run(cmd)
-            print(result)
+            line = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if line in ("exit", "quit"):
+            break
+        if not line:
+            continue
+
+        if line.startswith("/"):
+            line = line[1:]
+
+        tokens = CommandLexer.Split(line)
+        ctx = CommandContext(
+            RawText=line,
+            RawTokens=tokens,
+            Source="console",
+        )
+
+        try:
+            result = await app.execute(ctx)
+            if result is not None:
+                print(result)
         except ParseError as e:
             print(f"ParseError: {e}")
-        print()
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())

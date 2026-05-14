@@ -149,18 +149,18 @@ class Bot:
                 version=ConnectionService.version,
             )
 
-            # 注册控制台服务
+            # 启动交互式控制台
             self._console = ConsoleApp(self)
+            self._console_ui = attach_console(self, self._console)
+            await self._console_ui.start()
+
+            # 注册控制台服务
             self._plugin_manager._registry.register(
                 name="console.app",
                 instance=self._console,
                 provider="Bot",
                 version="1.0.0",
             )
-
-            # 启动交互式控制台
-            self._console_ui = attach_console(self, self._console)
-            await self._console_ui.start()
 
             # 加载插件
             plugin_classes = self._discover_plugins()

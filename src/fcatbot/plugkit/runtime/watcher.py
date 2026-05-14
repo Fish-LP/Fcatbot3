@@ -143,15 +143,16 @@ class PluginWatcher:
 
     def add_plugin(self, plugin, *, code_path: Path | None = None):
         name = plugin.name
-
-        # 如果 start() 已执行，self._loop 已就绪；否则为 None，等 start() 回写
         loop = self._loop if (self._loop and not self._loop.is_closed()) else None
 
         config_dir = plugin.get_config_path("").parent
         config_dir.mkdir(parents=True, exist_ok=True)
-        config_handler = _DebouncedHandler(
-            lambda p: self._on_config_changed(name, p), self._delay, loop
-        )
+
+        # 用嵌套函数彻底隔离作用域，不再依赖 lambda
+        def _config_handler(p: str) -> None:
+            self._on_config_changed(name, p)
+
+        config_handler = _DebouncedHandler(_config_handler, self._delay, loop)
         config_watch = self._observer.schedule(
             config_handler, str(config_dir), recursive=False
         )
@@ -160,10 +161,15 @@ class PluginWatcher:
         if code_path and code_path.exists():
             if code_path.suffix == ".zip":
                 return
+
             watch_path = str(code_path.parent if code_path.is_file() else code_path)
-            code_handler = _DebouncedHandler(
-                lambda p: self._on_code_changed(name, p), self._delay, loop
-            )
+
+            def _code_handler(p: Path) -> None:
+                self._on_code_changed(name, p)
+
+            print(name)
+
+            code_handler = _DebouncedHandler(_code_handler, self._delay, loop)
             code_watch = self._observer.schedule(
                 code_handler, watch_path, recursive=True
             )

@@ -18,9 +18,9 @@ if __name__ == "__main__":
     p_start.add_argument(
         "--debug", action="store_true", help="调试模式（详细日志+异常透传）"
     )
-    p_start.add_argument(
-        "--dev", action="store_true", help="开发模式（插件热重载+文件监视）"
-    )
+    # p_start.add_argument(
+    #     "--dev", action="store_true", help="开发模式（插件热重载+文件监视）"
+    # )
 
     args = parser.parse_args()
 
@@ -32,7 +32,7 @@ if __name__ == "__main__":
             plugin_dir=args.plugin_dir,
             data_dir=args.data_dir,
             debug=args.debug,
-            dev=args.dev,
+            dev=False,  # 开发模式暂不启用,热重载功能不稳定
         )
         try:
             bot.run()
