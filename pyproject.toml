@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Fcatbot"
-version = "3.0.5"
+version = "3.0.6"
 authors = [{ name = "Fish-LP", email = "Fish.zh@outlook.com" }]
 license = { text = "MIT" }
 classifiers = [

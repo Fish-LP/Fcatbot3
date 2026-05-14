@@ -1,11 +1,13 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Generic, TypeVar
+
+T = TypeVar("T")
 
 
 @dataclass
-class Event:
+class Event(Generic[T]):  # T 仅方便使用
     name: str = ""
-    data: Any = None
+    data: T | None = None
     source: str = ""
     metadata: dict = field(default_factory=dict)
     _cancelled: bool = field(default=False, repr=False)
