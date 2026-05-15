@@ -220,13 +220,14 @@ class ConsoleApp:
             None
         """
         names = self._registered.pop(provider, [])
-        for name in names:
-            self.app._node.Subcommands.pop(name, None)
-            alt = name.replace("-", "_")
-            if alt != name:
-                self.app._node.Subcommands.pop(alt, None)
+        if names:
+            for name in names:
+                self.app._node.Subcommands.pop(name, None)
+                alt = name.replace("-", "_")
+                if alt != name:
+                    self.app._node.Subcommands.pop(alt, None)
 
-        log.info("Console unregistered %d command(s) from %s", len(names), provider)
+            log.info("Console unregistered %d command(s) from %s", len(names), provider)
 
     async def execute(self, text: str) -> Any:
         """解析并执行控制台命令。

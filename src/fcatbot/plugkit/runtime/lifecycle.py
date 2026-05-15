@@ -111,11 +111,11 @@ class LifecycleManager:
         """
         设计文档约定: on_mixin_load(self, plugin, env)
         """
-        method = getattr(plugin, method_name, None)
+        method = getattr(mixin, method_name, None)
         if method is None:
             return None
 
-        return method(plugin, env)
+        return method(plugin, plugin, env)
 
     async def _load_locked(self, plugin_cls: type[Plugin]) -> Plugin:
         if plugin_cls.name in self._plugins:
@@ -306,7 +306,7 @@ class LifecycleManager:
         self._registry.unregister_by_provider(plugin.name)
 
         for mixin in reversed(self._collect_mixins(type(plugin))):
-            if hasattr(mixin, "on_mixin_unload"):
+            if hasattr(mixin, "on_mixin_unload") and mixin is not type(plugin):
                 await self._run_async(
                     self._call_mixin_method(mixin, "on_mixin_unload", plugin, None)
                 )

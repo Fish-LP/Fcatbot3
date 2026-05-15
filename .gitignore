@@ -236,9 +236,9 @@ totp.py
 plugins.zip
 plugins.txt
 src/fcatbot/plugkit/runtime/lifecycle.py
-fcatbot3.txt
 models.txt
 tool/StructArbor.py
-Fcatbot3.txt
 Plugins.txt
 qr_bitstream.bin
+Fcatbot*.txt
+fcatbot*.txt
