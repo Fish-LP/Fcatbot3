@@ -21,12 +21,8 @@ dev = ["pytest>=7.0", "pytest-cov", "pytest-asyncio"]
 [tool.setuptools]
 package-dir = { "" = "src" }
 
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["connection*", "plugkit*"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
-pythonpath = ["src"]
+pythonpath = ["."]
 asyncio_mode = "auto"
