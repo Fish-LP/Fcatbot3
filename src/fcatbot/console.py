@@ -388,12 +388,16 @@ class PromptToolkitConsole:
                             _print(ANSI(f"{Color.Red}ParseError{Color.Reset}: {e}"))
                         except EOFError:
                             asyncio.create_task(self.bot.stop())
+                            self._stop_event.set()
                             break
                         except asyncio.CancelledError:
                             break
                         except Exception as e:
                             log.exception("Console execute failed")
                             _print(ANSI(f"{Color.Red}Error{Color.Reset}: {e}"))
+                except KeyboardInterrupt:
+                    self._stop_event.set()
+                    asyncio.create_task(self.bot.stop())
                 finally:
                     cleanup_task.cancel()
                     try:

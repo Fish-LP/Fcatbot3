@@ -1,9 +1,12 @@
 import argparse
 import asyncio
+import gc
 import logging
 import sys
 from pathlib import Path
 from typing import ClassVar, Optional
+
+import aiohttp
 
 from fcatbot.connection.websocket import AsyncWebSocketClient, ListenerId
 from fcatbot.console import ConsoleApp, PromptToolkitConsole, attach_console
@@ -106,6 +109,8 @@ class Bot:
                 await self._stop_event.wait()
             except asyncio.CancelledError:
                 log.info("Bot 任务被取消")
+            except KeyboardInterrupt:
+                asyncio.create_task(self.stop())
             except Exception:
                 log.exception("Bot 运行异常")
 
@@ -258,6 +263,12 @@ class Bot:
             await self._ws.stop()
         except Exception as exc:
             log.error("WS 关闭异常: %s", exc)
+
+        await asyncio.sleep(0.05)
+        for obj in gc.get_objects():
+            if isinstance(obj, aiohttp.ClientSession) and not obj.closed:
+                log.warning("发现未关闭的 ClientSession，强制关闭: %s", id(obj))
+                await obj.close()
 
         Bot.running = False
         self._stop_event.set()
