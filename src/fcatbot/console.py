@@ -82,7 +82,7 @@ class ConsoleApp:
                     return f"{Color.Red}未知命令: {raw}{Color.Reset}"
         return app._format_help(node)
 
-    @on_command(description="停止 Bot")
+    @on_command(description="停止 Bot", aliases=["exit", "bye"])
     async def _stop(self, ctx: CommandContext) -> str:
         """停止 Bot。
 

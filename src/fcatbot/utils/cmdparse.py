@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 # ==================== 装饰器层 ====================
 
@@ -66,13 +66,18 @@ class GroupBuilder:
         return func
 
     def command(
-        self, name: Optional[str] = None, *, description: str = ""
+        self,
+        name: Optional[str] = None,
+        *,
+        description: str = "",
+        aliases: Optional[Sequence[str]] = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """返回一个装饰器，用于将函数注册为当前分组下的子命令。
 
         Args:
             name: 子命令名称。若为 None，则自动从函数名推导（去除 _cmd_ 或 _ 前缀）。
             description: 子命令描述。
+            aliases: 子命令别名列表。
 
         Return:
             一个装饰器函数，接收原函数并返回标记后的函数。
@@ -89,6 +94,7 @@ class GroupBuilder:
             func.__command_name__ = node_name
             func.__command_description__ = description
             func.__command_group__ = self.name
+            func.__command_aliases__ = list(aliases) if aliases else []
             return func
 
         return decorator
@@ -103,13 +109,18 @@ class _OnCommand:
     """
 
     def __call__(
-        self, name: Optional[str] = None, *, description: str = ""
+        self,
+        name: Optional[str] = None,
+        *,
+        description: str = "",
+        aliases: Optional[Sequence[str]] = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """注册单个命令的装饰器。
 
         Args:
             name: 命令名称。若为 None，则自动从函数名推导（去除 _cmd_ 或 _ 前缀）。
             description: 命令描述。
+            aliases: 命令别名列表。
 
         Return:
             一个装饰器函数，用于标记目标函数。
@@ -125,6 +136,7 @@ class _OnCommand:
                     node_name = node_name[1:]
             func.__command_name__ = node_name
             func.__command_description__ = description
+            func.__command_aliases__ = list(aliases) if aliases else []
             return func
 
         return decorator
@@ -180,6 +192,7 @@ class CommandNode:
         Description: 节点描述。
         Handler: 命令处理函数，若为 None 则表示该节点为中间分组节点。
         Doc: 处理函数的文档字符串，用于帮助信息展示。
+        Aliases: 命令别名列表。
     """
 
     def __init__(
@@ -189,6 +202,7 @@ class CommandNode:
         *,
         Handler: Optional[Callable[..., Any]] = None,
         Doc: str = "",
+        Aliases: Optional[Sequence[str]] = None,
     ):
         """初始化命令节点。
 
@@ -197,11 +211,13 @@ class CommandNode:
             Description: 节点描述。
             Handler: 命令处理函数。
             Doc: 文档字符串。
+            Aliases: 命令别名列表。
         """
         self.Name = Name
         self.Description = Description
         self.Handler = Handler
         self.Doc = Doc
+        self.Aliases: List[str] = list(Aliases) if Aliases else []
         self.Subcommands: Dict[str, CommandNode] = {}
         self.Parent: Optional[CommandNode] = None
 
@@ -209,7 +225,7 @@ class CommandNode:
         """添加子命令节点，并自动建立父子关系。
 
         同时会为节点名称中的连字符 "-" 生成下划线 "_" 的别名，
-        以支持两种风格的命令输入。
+        并注册节点自定义 Aliases 中声明的所有别名，以支持多种风格的命令输入。
 
         Args:
             node: 待添加的子命令节点。
@@ -219,9 +235,21 @@ class CommandNode:
         """
         node.Parent = self
         self.Subcommands[node.Name] = node
+
+        # 自动别名：连字符与下划线互换
         alt = node.Name.replace("-", "_")
-        if alt != node.Name:
+        if alt != node.Name and alt not in self.Subcommands:
             self.Subcommands[alt] = node
+
+        alt2 = node.Name.replace("_", "-")
+        if alt2 != node.Name and alt2 not in self.Subcommands:
+            self.Subcommands[alt2] = node
+
+        # 注册用户自定义别名
+        for alias in node.Aliases:
+            if alias and alias not in self.Subcommands:
+                self.Subcommands[alias] = node
+
         return self
 
     def GetCommandPath(self) -> List[str]:
@@ -318,6 +346,7 @@ class CommandApp:
         self._node = CommandNode(Name=Name, Description=Description)
         self._parent = parent
         self._colorize = colorize
+        self._help_aliases: set[str] = {"help", "--help", "-h"}
         self._c = (
             {
                 "reset": "\x1b[0m",
@@ -334,6 +363,18 @@ class CommandApp:
                 for k in ("reset", "bold", "cyan", "yellow", "green", "gray", "red")
             }
         )
+
+    def add_help_alias(self, *aliases: str) -> None:
+        """为内置 help 触发词添加别名。
+
+        当用户输入的剩余令牌匹配这些别名时，将显示对应节点的帮助信息。
+        若已通过 `@on_command("help", aliases=[...])` 显式注册 help 命令，
+        则显式命令优先，此内置别名仅在未命中显式命令时生效。
+
+        Args:
+            aliases: 要添加的 help 别名，例如 "h", "?"。
+        """
+        self._help_aliases.update(aliases)
 
     def register(
         self, func: Callable[..., Any], command_name: str | None = None
@@ -352,12 +393,14 @@ class CommandApp:
             group_name = getattr(underlying, "__command_group_name__")
             group_desc = getattr(underlying, "__command_group_description__", "")
             cmd_desc = getattr(underlying, "__command_description__", group_desc)
+            aliases = getattr(underlying, "__command_aliases__", [])
 
             node = CommandNode(
                 Name=group_name,
                 Description=cmd_desc,
                 Handler=func,
                 Doc=inspect.getdoc(underlying) or "",
+                Aliases=aliases,
             )
             self._node.AddSubcommand(node)
             return
@@ -367,12 +410,14 @@ class CommandApp:
             raise ValueError(f"{func!r} 未被 @on_command 或 GroupBuilder 装饰")
 
         cmd_desc = getattr(underlying, "__command_description__", "")
+        aliases = getattr(underlying, "__command_aliases__", [])
 
         node = CommandNode(
             Name=cmd_name,
             Description=cmd_desc,
             Handler=func,
             Doc=inspect.getdoc(underlying) or "",
+            Aliases=aliases,
         )
         self._node.AddSubcommand(node)
 
@@ -425,12 +470,14 @@ class CommandApp:
             group_name = getattr(underlying, "__command_group_name__")
             group_desc = getattr(underlying, "__command_group_description__", "")
             cmd_desc = getattr(underlying, "__command_description__", group_desc)
+            aliases = getattr(underlying, "__command_aliases__", [])
 
             node = CommandNode(
                 Name=group_name,
                 Description=cmd_desc,
                 Handler=bound,
                 Doc=inspect.getdoc(underlying) or "",
+                Aliases=aliases,
             )
             self._node.AddSubcommand(node)
             groups[group_name] = node
@@ -453,12 +500,14 @@ class CommandApp:
                     cmd_desc = doc.strip().splitlines()[0]
 
             group_name = getattr(underlying, "__command_group__", None)
+            aliases = getattr(underlying, "__command_aliases__", [])
 
             node = CommandNode(
                 Name=cmd_name,
                 Description=cmd_desc,
                 Handler=bound,
                 Doc=inspect.getdoc(underlying) or "",
+                Aliases=aliases,
             )
 
             if group_name and group_name in groups:
@@ -471,11 +520,10 @@ class CommandApp:
 
         路由逻辑：
         1. 若令牌为空，抛出 ParseError。
-        2. 若输入为 help / --help / -h，返回当前节点的帮助信息。
-        3. 按令牌逐层匹配子命令树。
-        4. 若剩余令牌以 help 开头，返回匹配到的节点的帮助信息。
-        5. 若匹配到的节点无处理函数，返回帮助信息。
-        6. 根据处理函数签名注入参数（ctx、raw、其余默认值参数），并调用处理函数。
+        2. 按令牌逐层匹配子命令树（支持别名）。
+        3. 若剩余令牌匹配 help 别名集合，返回匹配到的节点的帮助信息。
+        4. 若匹配到的节点无处理函数，返回帮助信息。
+        5. 根据处理函数签名注入参数（ctx、raw、其余默认值参数），并调用处理函数。
 
         Args:
             ctx: 命令执行上下文。
@@ -494,9 +542,6 @@ class CommandApp:
         if not tokens:
             raise ParseError("Empty command")
 
-        # if tokens[0] in ("help", "--help", "-h") and len(tokens) == 1:
-        #     return self._format_help(self._node)
-
         node = self._node
         idx = 0
         while idx < len(tokens) and tokens[idx] in node.Subcommands:
@@ -506,7 +551,7 @@ class CommandApp:
         remaining = tokens[idx:]
         raw_text = " ".join(remaining)
 
-        if remaining and remaining[0] in ("--help", "-h", "help"):
+        if remaining and remaining[0] in self._help_aliases:
             return self._format_help(node)
 
         if node.Handler is None:
@@ -580,7 +625,7 @@ class CommandApp:
     def _format_help(self, node: CommandNode) -> str:
         """格式化指定节点的帮助信息，输出 Mirai 风格的文本。
 
-        包含 Usage、描述、文档字符串及子命令列表。
+        包含 Usage、描述、文档字符串及子命令列表（同行显示别名）。
 
         Args:
             node: 目标命令节点。
@@ -606,6 +651,14 @@ class CommandApp:
             f"{C['bold']}{usage}{C['reset']}"
         )
 
+        # 别名展示（仅当前节点自身）
+        if node.Aliases:
+            alias_str = ", ".join(node.Aliases)
+            lines.append(
+                f"{C['bold']}{C['gray']}Aliases:{C['reset']} "
+                f"{C['gray']}{alias_str}{C['reset']}"
+            )
+
         doc = (node.Doc or "").strip()
         if doc and doc != (node.Description or "").strip():
             lines.append(f"\n{C['gray']}{node.Name}{C['reset']}")
@@ -616,18 +669,29 @@ class CommandApp:
 
         if node.Subcommands:
             lines.append(f"\n{C['bold']}{C['yellow']}Commands:{C['reset']}")
-            seen = set()
+
+            # 反向映射：CommandNode -> 所有能触发它的名称（主名+别名）
+            node_names: Dict[CommandNode, List[str]] = {}
             for name, sub in node.Subcommands.items():
-                if sub in seen:
-                    continue
-                seen.add(sub)
+                node_names.setdefault(sub, []).append(name)
+
+            for sub, names in node_names.items():
+                # 去重排序：主名在前，其余按字典序
+                unique_names: List[str] = []
+                if sub.Name in names:
+                    unique_names.append(sub.Name)
+                for n in sorted(names):
+                    if n != sub.Name and n not in unique_names:
+                        unique_names.append(n)
+
+                names_str = ", ".join(unique_names)
                 desc = sub.Description.strip() if sub.Description else ""
 
                 usage_hint = self._format_usage(sub, brief=True)
                 if usage_hint:
-                    cmd_line = f"{name} {usage_hint}"
+                    cmd_line = f"{names_str} {usage_hint}"
                 else:
-                    cmd_line = name
+                    cmd_line = names_str
 
                 lines.append(
                     f"  {C['bold']}{C['green']}{cmd_line:<30}{C['reset']} {desc}"
