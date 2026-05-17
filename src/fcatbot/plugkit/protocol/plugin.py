@@ -76,7 +76,7 @@ class PluginMixin(Protocol):
         这是一个实例方法，self 是混入类在目标插件实例上的绑定实例。
 
         Args:
-            plugin: 被混入的目标插件实例。
+            plugin: 被混入的目标插件实例（与 self 为同一对象）。
             env: 包含 ``data_root`` 和 ``bus`` 属性的环境对象。
         """
         ...

@@ -92,10 +92,7 @@ class ConsoleApp:
         Return:
             停止提示文本。
         """
-        app: ConsoleApp = self
-        if app is None:
-            return f"{Color.Red}内部错误{Color.Reset}"
-        asyncio.create_task(app.bot.stop())
+        asyncio.create_task(self.bot.stop())
         return f"{Color.Yellow}正在停止 Bot ...{Color.Reset}"
 
     @on_command(description="查看插件状态")
@@ -108,10 +105,7 @@ class ConsoleApp:
         Return:
             各插件状态列表。
         """
-        app: ConsoleApp = self
-        if app is None:
-            return f"{Color.Red}内部错误{Color.Reset}"
-        pm = app.bot._plugin_manager
+        pm = self.bot._plugin_manager
         if pm is None:
             return f"{Color.Red}插件管理器尚未初始化{Color.Reset}"
         lines = [f"{Color.Bold}插件状态:{Color.Reset}"]
@@ -138,10 +132,7 @@ class ConsoleApp:
         Return:
             重载结果提示。
         """
-        app: ConsoleApp = self
-        if app is None:
-            return f"{Color.Red}内部错误{Color.Reset}"
-        pm = app.bot._plugin_manager
+        pm = self.bot._plugin_manager
         if pm is None:
             return f"{Color.Red}插件管理器尚未初始化{Color.Reset}"
         parts = raw.split()

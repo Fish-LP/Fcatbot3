@@ -105,14 +105,8 @@ class Bot:
         async def _runner() -> None:
             try:
                 await self.run_async()
-                # run_async 结束后 _stop_event 已 set，wait 立即返回
-                await self._stop_event.wait()
-            except asyncio.CancelledError:
-                log.info("Bot 任务被取消")
             except KeyboardInterrupt:
-                asyncio.create_task(self.stop())
-            except Exception:
-                log.exception("Bot 运行异常")
+                log.info("收到中断信号")
 
         try:
             loop = asyncio.get_running_loop()
@@ -204,21 +198,14 @@ class Bot:
 
     async def _cat_loop(self) -> None:
         """持续从 WS 读取并发布事件，直到停止信号。"""
-        try:
-            while not self._stop_event.is_set() and self._ws.running:
-                try:
-                    await self._cat()
-                except Exception as exc:
-                    log.debug("Cat loop error: %s", exc)
-        except asyncio.CancelledError:
-            pass  # ← 正常响应取消
+        while not self._stop_event.is_set() and self._ws.running:
+            try:
+                await self._cat()
+            except Exception as exc:
+                log.debug("Cat loop error: %s", exc)
 
     async def _cat(self) -> None:
         """从 WS 读取原始消息，以最小开销发布到总线。"""
-        if self._listener_id is None:
-            await asyncio.sleep(0.05)
-            return
-
         try:
             msg, msg_type = await self._ws.get_message(self._listener_id, timeout=1.0)
         except asyncio.TimeoutError:
@@ -238,41 +225,46 @@ class Bot:
                 )
             },
         )
-        if self._bus is not None:
-            await self._bus.publish(event)
+        await self._bus.publish(event)
 
     # ==================== 优雅退出 ====================
 
     async def stop(self) -> None:
-        if not Bot.running and self._stop_event.is_set():
+        if self._stop_event.is_set():
             return
 
         self._stop_event.set()
-        print()
         log.info("Bot 正在退出 ...")
 
-        # ← 关键：先取消 serve() 的阻塞，让 gather 能结束
         if self._plugin_manager is not None:
-            self._plugin_manager.request_shutdown()
             try:
+                self._plugin_manager.request_shutdown()
                 await self._plugin_manager.shutdown()
             except Exception as exc:
                 log.error("插件系统关闭异常: %s", exc)
 
-        try:
-            await self._ws.stop()
-        except Exception as exc:
-            log.error("WS 关闭异常: %s", exc)
+        if self._ws is not None:
+            try:
+                await self._ws.stop()
+            except Exception as exc:
+                log.error("WS 关闭异常: %s", exc)
 
-        await asyncio.sleep(0.05)
-        for obj in gc.get_objects():
-            if isinstance(obj, aiohttp.ClientSession) and not obj.closed:
-                log.warning("发现未关闭的 ClientSession，强制关闭: %s", id(obj))
-                await obj.close()
+        await self._force_close_sessions()
 
         Bot.running = False
-        self._stop_event.set()
         log.info("Bot 已完全停止")
+
+    async def _force_close_sessions(self) -> None:
+        """防御性清理：关闭任何泄漏的 aiohttp ClientSession。"""
+        await asyncio.sleep(0.05)  # 给事件循环时间完成回调
+        leaked = [
+            obj
+            for obj in gc.get_objects()
+            if isinstance(obj, aiohttp.ClientSession) and not obj.closed
+        ]
+        for sess in leaked:
+            log.warning("发现未关闭的 ClientSession，强制关闭: %s", id(sess))
+            await sess.close()
 
     # ==================== 工具 ====================
 
@@ -307,9 +299,7 @@ class Bot:
                     classes.append(cls)
                     log.debug("发现插件: %s", name)
                 except Exception as exc:
-                    # from fcatbot.plugkit.runtime.loader import No
                     log.warning("加载插件 %s 失败: %s", name, exc)
-                    # raise exc
         return classes
 
 

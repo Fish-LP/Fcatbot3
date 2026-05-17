@@ -97,7 +97,7 @@ class LifecycleManager:
                 return list(explicit)
 
         mixins = []
-        for cls in plugin_cls.__mro__:
+        for cls in plugin_cls.__bases__:
             if cls is Plugin or cls is object:
                 continue
             if hasattr(cls, "on_mixin_load") or hasattr(cls, "on_mixin_unload"):

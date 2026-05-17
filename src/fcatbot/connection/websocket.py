@@ -1008,22 +1008,36 @@ class AsyncWebSocketClient:
         """
         while self._running:
             if not self.connection.is_connected():
-                await asyncio.sleep(0.1)
+                try:
+                    await asyncio.sleep(0.1)
+                except asyncio.CancelledError:
+                    break
                 continue
             try:
                 message = await asyncio.wait_for(self._send_queue.get(), timeout=0.1)
             except asyncio.TimeoutError:
                 continue
+            except asyncio.CancelledError:
+                break
+            except RuntimeError:
+                # 事件循环已关闭
+                break
 
             try:
                 await self.connection.send(message)
             except asyncio.CancelledError:
-                # 将消息放回队列并重新抛出
-                await self._send_queue.put(message)
-                raise
+                # 事件循环关闭时，尝试放回消息但不阻塞
+                try:
+                    self._send_queue.put_nowait(message)
+                except asyncio.QueueFull:
+                    pass
+                break
             except WSConnectionError:
                 # 连接不可用，将消息重新入队并退出，触发重连
-                await self._send_queue.put(message)
+                try:
+                    self._send_queue.put_nowait(message)
+                except asyncio.QueueFull:
+                    pass
                 break
             except Exception as e:
                 self.logger.error(f"Send processing error: {e}")
@@ -1040,7 +1054,10 @@ class AsyncWebSocketClient:
         """
         while self._running:
             if not self.connection.is_connected():
-                await asyncio.sleep(0.1)
+                try:
+                    await asyncio.sleep(0.1)
+                except asyncio.CancelledError:
+                    break
                 continue
             try:
                 message, msg_type = await self.connection.receive()
@@ -1052,7 +1069,10 @@ class AsyncWebSocketClient:
                 # 只是没有消息，继续等待
                 continue
             except asyncio.CancelledError:
-                raise
+                break
+            except RuntimeError:
+                # 事件循环已关闭
+                break
             except Exception as e:
                 self.logger.error(f"Receive processing error: {e}")
                 # 接收错误通常意味着连接问题，关闭连接触发重连
