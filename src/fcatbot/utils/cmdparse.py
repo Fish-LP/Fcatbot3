@@ -1,11 +1,79 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    ParamSpec,
+    Protocol,
+    Sequence,
+    TypeVar,
+    cast,
+)
+
+P = ParamSpec("P")
+R = TypeVar("R", covariant=True)
 
 # ==================== 装饰器层 ====================
+
+
+class _SubCommandRegistrar:
+    """子命令注册器，挂载在已被 @on_command 装饰的函数上。
+
+    支持语法：@func.command(name, *, description, aliases)
+    """
+
+    def __init__(self, group_name: str):
+        self.group_name = group_name
+
+    def __call__(
+        self,
+        name: Optional[str] = None,
+        *,
+        description: str = "",
+        aliases: Optional[Sequence[str]] = None,
+    ) -> Callable[[Callable[P, R]], Callable[P, R]]:
+        """返回一个装饰器，用于将函数注册为当前分组下的子命令。"""
+
+        def decorator(func: Callable[P, R]) -> Callable[P, R]:
+            node_name = name
+            if node_name is None:
+                node_name = func.__name__
+                if node_name.startswith("_cmd_"):
+                    node_name = node_name[5:]
+                if node_name.startswith("_"):
+                    node_name = node_name[1:]
+            func.__command_name__ = node_name
+            func.__command_description__ = description
+            func.__command_group__ = self.group_name
+            func.__command_aliases__ = list(aliases) if aliases else []
+            return func
+
+        return decorator
+
+
+class CommandFunc(Protocol[P, R]):
+    """被 @on_command 装饰后的函数类型。
+
+    保留原函数的参数签名 (P) 与返回值 (R)，
+    并在 IDE 中提供 .command 属性提示。
+    """
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+    command: _SubCommandRegistrar
+    """
+    Args:
+        name: 子命令名称。若为 None，则自动从函数名推导（去除 _cmd_ 或 _ 前缀）。
+        description: 子命令描述。
+        aliases: 子命令别名列表。
+    """
 
 
 class GroupBuilder:
@@ -106,6 +174,7 @@ class _OnCommand:
     通过 `on_command` 单例使用：
     - `@on_command()` 注册单个命令。
     - `@on_command.group()` 创建命令分组。
+    - `@on_command("plug")` 注册命令并暴露 `.command()` 以支持子命令。
     """
 
     def __call__(
@@ -114,19 +183,13 @@ class _OnCommand:
         *,
         description: str = "",
         aliases: Optional[Sequence[str]] = None,
-    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    ) -> Callable[[Callable[P, R]], CommandFunc[P, R]]:
         """注册单个命令的装饰器。
 
-        Args:
-            name: 命令名称。若为 None，则自动从函数名推导（去除 _cmd_ 或 _ 前缀）。
-            description: 命令描述。
-            aliases: 命令别名列表。
-
-        Return:
-            一个装饰器函数，用于标记目标函数。
+        同时将该命令标记为分组根节点，使其支持 `.command(...)` 子命令注册。
         """
 
-        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        def decorator(func: Callable[P, R]) -> CommandFunc[P, R]:
             node_name = name
             if node_name is None:
                 node_name = func.__name__
@@ -137,22 +200,20 @@ class _OnCommand:
             func.__command_name__ = node_name
             func.__command_description__ = description
             func.__command_aliases__ = list(aliases) if aliases else []
-            return func
+
+            # 关键：同时标记为分组根节点，支持 @plug.command(...)
+            func.__command_is_group_root__ = True
+            func.__command_group_name__ = node_name
+            func.__command_group_description__ = description
+            func.command = _SubCommandRegistrar(node_name)
+            return cast(CommandFunc[P, R], func)
 
         return decorator
 
     def group(
         self, name: Optional[str] = None, *, description: str = ""
     ) -> GroupBuilder:
-        """创建一个命令分组构建器。
-
-        Args:
-            name: 分组名称。
-            description: 分组描述。
-
-        Return:
-            GroupBuilder 实例，可用于进一步注册子命令。
-        """
+        """创建一个命令分组构建器。"""
         return GroupBuilder(name=name, description=description)
 
 
@@ -284,8 +345,8 @@ class CommandLexer:
 
         处理规则：
         - 按空白字符分割。
-        - 支持 "..." 和 \'...\' 包裹的字符串（去除引号）。
-        - 支持 \\\\, \\\", \\\' 的转义序列还原。
+        - 支持 "..." 和 '...' 包裹的字符串（去除引号）。
+        - 支持 \, ", \' 的转义序列还原。
 
         Args:
             text: 原始命令行文本。
@@ -382,6 +443,7 @@ class CommandApp:
         """注册单个函数为命令或命令分组根节点。
 
         自动识别 `@on_command.group()` 标记的分组根节点，或普通命令节点。
+        若命令带有 `__command_group__` 元数据且对应分组已存在，则挂载为子命令。
 
         Args:
             func: 被装饰的处理函数。
@@ -419,6 +481,15 @@ class CommandApp:
             Doc=inspect.getdoc(underlying) or "",
             Aliases=aliases,
         )
+
+        # 若声明了所属分组且该分组已注册，则挂载为子命令
+        group_name = getattr(underlying, "__command_group__", None)
+        if group_name:
+            parent = self._node.Subcommands.get(group_name)
+            if parent is not None:
+                parent.AddSubcommand(node)
+                return
+
         self._node.AddSubcommand(node)
 
     @property
@@ -806,3 +877,103 @@ async def console_adapter(app: CommandApp):
                 print(result)
         except ParseError as e:
             print(f"ParseError: {e}")
+
+
+# ==================== 测试命令定义 ====================
+if __name__ == "__main__":
+
+    @on_command("plug", description="插件管理命令")
+    def plug(ctx: CommandContext, raw: str = ""):
+        """查看插件状态或管理插件。
+
+        直接调用 plug 会显示当前已加载的插件列表。
+        """
+        return f"[plug] 当前命令来源: {ctx.Source}，附加参数: {raw!r}"
+
+    @plug.command()
+    @plug.command("set", description="设置插件配置")
+    def plug_set(
+        ctx: CommandContext, raw: str = "", key: str = "default", value: str = ""
+    ):
+        """设置指定插件的配置项。
+
+        Args:
+            key: 配置项名称。
+            value: 配置项值。
+
+        Return:
+            设置结果字符串。
+        """
+        return f"[plug set] 设置 {key} = {value!r} (raw={raw!r})"
+
+    @plug.command("list", aliases=["ls"], description="列出所有插件")
+    def plug_list(ctx: CommandContext, raw: str = ""):
+        """列出所有已安装的插件。"""
+        return "[plug list] 插件列表: foo, bar, baz"
+
+    @on_command("hello", description="打个招呼")
+    def hello(ctx: CommandContext, raw: str = "", name: str = "world"):
+        """向世界或指定对象问好。"""
+        return f"Hello, {name}! (raw={raw!r})"
+
+    # ==================== __main__ 测试入口 ====================
+
+    async def _test():
+        app = CommandApp(Name="TestBot", colorize=True)
+
+        # 注册命令
+        app.register(plug)
+        app.register(plug_set)
+        app.register(plug_list)
+        app.register(hello)
+
+        print("=" * 50)
+        print("测试 1: 执行根命令 plug")
+        print("=" * 50)
+        result = await app.run("plug", "console")
+        print(result)
+        print()
+
+        print("=" * 50)
+        print("测试 2: 执行子命令 plug set")
+        print("=" * 50)
+        result = await app.run("plug set key1=value1", "console")
+        print(result)
+        print()
+
+        print("=" * 50)
+        print("测试 3: 执行子命令 plug list")
+        print("=" * 50)
+        result = await app.run("plug list", "console")
+        print(result)
+        print()
+
+        print("=" * 50)
+        print("测试 4: 执行子命令 plug ls (别名)")
+        print("=" * 50)
+        result = await app.run("plug ls", "console")
+        print(result)
+        print()
+
+        print("=" * 50)
+        print("测试 5: 执行独立命令 hello")
+        print("=" * 50)
+        result = await app.run("hello Kimi", "console")
+        print(result)
+        print()
+
+        print("=" * 50)
+        print("测试 6: plug help")
+        print("=" * 50)
+        result = await app.run("plug help", "console")
+        print(result)
+        print()
+
+        print("=" * 50)
+        print("测试 7: 根 help")
+        print("=" * 50)
+        result = await app.run("help", "console")
+        print(result)
+        print()
+
+    asyncio.run(_test())
