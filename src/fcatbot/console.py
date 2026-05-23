@@ -197,7 +197,7 @@ class ConsoleApp:
             registered_names.append(name)
 
         self._registered[provider] = registered_names
-        log.info(
+        log.debug(
             "Console registered %d command(s) from %s", len(registered_names), provider
         )
 
@@ -218,7 +218,9 @@ class ConsoleApp:
                 if alt != name:
                     self.app._node.Subcommands.pop(alt, None)
 
-            log.info("Console unregistered %d command(s) from %s", len(names), provider)
+            log.debug(
+                "Console unregistered %d command(s) from %s", len(names), provider
+            )
 
     async def execute(self, text: str) -> Any:
         """解析并执行控制台命令。
