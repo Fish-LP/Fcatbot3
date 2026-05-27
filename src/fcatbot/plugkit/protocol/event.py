@@ -1,13 +1,13 @@
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 
-T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
 
 
 @dataclass
-class Event(Generic[T]):  # T 仅方便使用
+class Event(Generic[T_co]):  # T 仅方便使用
     name: str = ""
-    data: T | Any = None
+    data: T_co | Any = None
     source: str = ""
     metadata: dict = field(default_factory=dict)
     _cancelled: bool = field(default=False, repr=False)
