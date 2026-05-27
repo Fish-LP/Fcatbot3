@@ -227,7 +227,9 @@ class ConfigSection(MutableMapping[str, Any]):
     # ---------- 序列化 ----------
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {}
-        for k, v in self._storage.items():
+        # 遍历声明字段 + 动态字段，触发 Value 懒加载，确保默认值进入序列化
+        for k in self:
+            v = self[k]  # 触发 __getattr__ / Value.__get__，把默认值写进 _storage
             if isinstance(v, ConfigSection):
                 result[k] = v.to_dict()
             elif isinstance(v, list):
