@@ -3,7 +3,13 @@ Plugkit 协议层
 """
 
 from fcatbot.plugkit.protocol.bus import EventBus, GlobalInterceptor, HandlerInterceptor
-from fcatbot.plugkit.protocol.data import ConfigSection, PluginConfig, PluginData, Value
+from fcatbot.plugkit.protocol.data import (
+    ConfigSection,
+    PluginConfig,
+    PluginData,
+    Value,
+    section,
+)
 from fcatbot.plugkit.protocol.event import Event
 from fcatbot.plugkit.protocol.exceptions import (
     BusClosedError,
@@ -44,6 +50,7 @@ __all__ = [
     "PluginConfig",
     "PluginData",
     "Value",
+    "section",
     # event
     "Event",
     # exceptions

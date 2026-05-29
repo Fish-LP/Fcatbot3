@@ -247,3 +247,5 @@ assetspack/*
 adapter.zip
 plugins_bak/*
 Adapter.txt
+schematics/*
+save_monger.py
