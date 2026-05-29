@@ -317,7 +317,7 @@ class PromptToolkitConsole:
 
     async def start(self) -> None:
 
-        session = PromptSession("> ")
+        session = PromptSession(">>> ")
         _print = print_formatted_text
 
         # 准备 PromptToolkit 专用日志处理器（暂不挂载到 root）
@@ -378,7 +378,7 @@ class PromptToolkitConsole:
                                     ANSI(result)
                                 )
                         except ParseError as e:
-                            _print(ANSI(f"{Color.Red}ParseError{Color.Reset}: {e}"))
+                            log.debug("ParseError: %s", e)
                         except EOFError:
                             asyncio.create_task(self.bot.stop())
                             self._stop_event.set()
