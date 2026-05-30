@@ -187,7 +187,11 @@ class ConfigSection(MutableMapping[str, Any]):
 
     # ---------- MutableMapping 兼容 ----------
     def __getitem__(self, key: str) -> Any:
-        return getattr(self, key)
+        try:
+            return getattr(self, key)
+        except AttributeError as e:
+            # 将 AttributeError 转换为 KeyError，保留原始信息
+            raise KeyError(key) from e
 
     def __setitem__(self, key: str, value: Any) -> None:
         setattr(self, key, value)
