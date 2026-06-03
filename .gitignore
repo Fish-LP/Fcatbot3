@@ -249,3 +249,5 @@ plugins_bak/*
 Adapter.txt
 schematics/*
 save_monger.py
+APIHelp.md
+UniversalAPIClient.py

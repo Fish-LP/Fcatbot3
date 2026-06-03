@@ -154,6 +154,18 @@ class Plugin(ABC):
         config.reload()
 
     @property
+    def data_path(self) -> Path:
+        if self._data_root is None:
+            raise PluginNotLoadedError(self.name)
+        return self._data_root / self.name / "data"
+
+    @property
+    def config_path(self) -> Path:
+        if self._data_root is None:
+            raise PluginNotLoadedError(self.name)
+        return self._data_root / self.name / "config"
+
+    @property
     def bus(self) -> EventBus:
         if self._bus is None:
             raise PluginNotLoadedError(self.name)
